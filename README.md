@@ -1,8 +1,20 @@
 <h1 align="center">spool</h1>
 
 <p align="center">
-  <b>The package manager for <a href="https://github.com/martin-k-m/twill">twill</a>.</b><br>
+  <b>The package manager for <a href="https://github.com/martin-k-m/raster">twill</a>.</b><br>
   Written in twill.
+</p>
+
+<!-- The twill repository is still named raster on github.com; the redirect
+     keeps this working once it is renamed. -->
+<p align="center">
+  <a href="https://github.com/martin-k-m/raster">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/martin-k-m/raster/main/assets/twill-mark-glow.png">
+      <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/martin-k-m/raster/main/assets/twill-mark.png">
+      <img alt="twill" src="https://raw.githubusercontent.com/martin-k-m/raster/main/assets/twill-mark.png" width="52">
+    </picture>
+  </a>
 </p>
 
 <p align="center">
