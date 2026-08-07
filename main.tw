@@ -1,0 +1,124 @@
+mode systems
+
+# spool: the package manager for the twill language.
+#
+# Argument parsing and help. Every command lives in src/commands.tw and returns
+# an error string, empty on success, so this file is the only place that decides
+# how a failure is printed and what the process exits with.
+
+import "src/strutil.tw" as s
+import "src/commands.tw" as commands
+
+let SPOOL_VERSION = "0.1.0"
+
+let USAGE = "spool is the package manager for the twill language.\n"
+  + "\n"
+  + "usage:\n"
+  + "  spool init [name]              create a spool.toml in this directory\n"
+  + "  spool add <name> <git-url> [version]\n"
+  + "                                 declare a dependency and install it\n"
+  + "  spool install [--update]       install what spool.toml declares\n"
+  + "  spool list                     show declared and installed packages\n"
+  + "  spool remove <name>            drop a dependency and reinstall\n"
+  + "  spool version                  print the spool version\n"
+  + "\n"
+  + "v0.1 resolves git sources only. There is no registry.\n"
+
+fn fail(msg: Str) {
+  write_err("spool: " + msg + "\n")
+  exit(1)
+}
+
+fn main() {
+  let argv = args()
+  if len(argv) < 2 {
+    print(USAGE)
+    return
+  }
+  let cmd = argv[1]
+  let rest: Arr[Str] = []
+  let i = 2
+  while i < len(argv) {
+    push(rest, argv[i])
+    i = i + 1
+  }
+  let dir = cwd()
+
+  if cmd == "help" or cmd == "--help" or cmd == "-h" {
+    print(USAGE)
+    return
+  }
+
+  if cmd == "version" or cmd == "--version" or cmd == "-v" {
+    print("spool " + SPOOL_VERSION)
+    return
+  }
+
+  if cmd == "init" {
+    let name = ""
+    if len(rest) > 0 {
+      name = rest[0]
+    } else {
+      # Default to the directory's own name, which is right often enough to be
+      # worth doing and wrong loudly enough (validate_name rejects it) not to be
+      # a trap.
+      let cut = s.last_index_of_byte(dir, s.B_SLASH)
+      name = dir[cut + 1:len(dir)]
+    }
+    check(commands.cmd_init(dir, name))
+    return
+  }
+
+  if cmd == "add" {
+    if len(rest) < 2 or len(rest) > 3 {
+      fail("usage: spool add <name> <git-url> [version]")
+    }
+    let version = ""
+    if len(rest) == 3 {
+      version = rest[2]
+    }
+    check(commands.cmd_add(dir, rest[0], rest[1], version))
+    return
+  }
+
+  if cmd == "install" {
+    let update = false
+    let a = 0
+    while a < len(rest) {
+      if rest[a] == "--update" or rest[a] == "-u" {
+        update = true
+      } else {
+        fail("unknown flag " + rest[a] + " for install")
+      }
+      a = a + 1
+    }
+    check(commands.cmd_install(dir, update))
+    return
+  }
+
+  if cmd == "list" {
+    if len(rest) > 0 {
+      fail("unknown argument " + rest[0] + " for list")
+    }
+    check(commands.cmd_list(dir))
+    return
+  }
+
+  if cmd == "remove" or cmd == "rm" {
+    if len(rest) != 1 {
+      fail("usage: spool remove <name>")
+    }
+    check(commands.cmd_remove(dir, rest[0]))
+    return
+  }
+
+  fail("unknown command " + cmd + "\n\n" + USAGE)
+}
+
+fn check(err: Str) {
+  if len(err) > 0 {
+    fail(err)
+  }
+}
+
+main()

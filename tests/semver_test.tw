@@ -1,0 +1,82 @@
+mode systems
+
+import "harness.tw" as t
+import "../src/semver.tw" as semver
+
+fn parse_accepts_a_plain_triple_and_a_leading_v() {
+  let a = semver.parse("1.2.3")
+  let b = semver.parse("v1.2.3")
+  t.check("parse accepts a plain triple", a.ok and a.major == 1 and a.minor == 2 and a.patch == 3)
+  t.check("parse accepts a leading v", b.ok and semver.compare(a, b) == 0)
+}
+
+fn parse_rejects_malformed_versions() {
+  let bad = ["", "1", "1.2", "1.2.3.4", "1.2.x", "1..3", "1.2.3-rc1", "-1.0.0"]
+  let i = 0
+  while i < len(bad) {
+    t.check("parse rejects " + bad[i], not semver.parse(bad[i]).ok)
+    i = i + 1
+  }
+}
+
+fn compare_orders_by_major_then_minor_then_patch() {
+  t.equal_i64("1.0.0 equals itself", semver.compare(semver.parse("1.0.0"), semver.parse("1.0.0")), 0)
+  t.equal_i64("1.0.0 precedes 2.0.0", semver.compare(semver.parse("1.0.0"), semver.parse("2.0.0")), -1)
+  t.equal_i64("1.9.9 precedes 1.10.0", semver.compare(semver.parse("1.9.9"), semver.parse("1.10.0")), -1)
+  t.equal_i64("0.1.2 follows 0.1.1", semver.compare(semver.parse("0.1.2"), semver.parse("0.1.1")), 1)
+}
+
+fn an_exact_constraint_matches_only_its_own_version() {
+  let c = semver.parse_constraint("1.2.3")
+  t.check("1.2.3 satisfies the exact constraint 1.2.3", semver.matches(c, semver.parse("1.2.3")))
+  t.check("1.2.4 does not satisfy the exact constraint 1.2.3", not semver.matches(c, semver.parse("1.2.4")))
+}
+
+fn a_caret_constraint_admits_the_same_major_and_nothing_higher() {
+  let c = semver.parse_constraint("^1.2.0")
+  t.check("1.2.0 satisfies ^1.2.0", semver.matches(c, semver.parse("1.2.0")))
+  t.check("1.30.0 satisfies ^1.2.0", semver.matches(c, semver.parse("1.30.0")))
+  t.check("1.1.9 does not satisfy ^1.2.0", not semver.matches(c, semver.parse("1.1.9")))
+  t.check("2.0.0 does not satisfy ^1.2.0", not semver.matches(c, semver.parse("2.0.0")))
+}
+
+fn below_one_zero_a_caret_constraint_pins_the_minor() {
+  let c = semver.parse_constraint("^0.2.1")
+  t.check("0.2.7 satisfies ^0.2.1", semver.matches(c, semver.parse("0.2.7")))
+  t.check("0.3.0 does not satisfy ^0.2.1", not semver.matches(c, semver.parse("0.3.0")))
+  let z = semver.parse_constraint("^0.0.3")
+  t.check("0.0.4 satisfies ^0.0.3", semver.matches(z, semver.parse("0.0.4")))
+  t.check("0.1.0 does not satisfy ^0.0.3", not semver.matches(z, semver.parse("0.1.0")))
+}
+
+fn unsupported_constraint_syntax_is_rejected_rather_than_widened() {
+  let bad = ["~1.2.3", ">=1.0.0", "1.2.*", "1.0.0 - 2.0.0", ""]
+  let i = 0
+  while i < len(bad) {
+    t.check("parse_constraint rejects " + bad[i], not semver.parse_constraint(bad[i]).ok)
+    i = i + 1
+  }
+  t.check("parse_constraint accepts *", semver.parse_constraint("*").ok)
+}
+
+fn highest_matching_picks_the_greatest_version_satisfying_every_constraint() {
+  let versions = [semver.parse("1.0.0"), semver.parse("1.4.2"), semver.parse("2.0.0")]
+  let one = [semver.parse_constraint("^1.0.0")]
+  t.equal_str("^1.0.0 picks 1.4.2", semver.to_str(versions[semver.highest_matching(versions, one)]), "1.4.2")
+
+  let both = [semver.parse_constraint("^1.0.0"), semver.parse_constraint("1.0.0")]
+  t.equal_str("^1.0.0 with 1.0.0 picks 1.0.0", semver.to_str(versions[semver.highest_matching(versions, both)]), "1.0.0")
+
+  let impossible = [semver.parse_constraint("^1.0.0"), semver.parse_constraint("^2.0.0")]
+  t.equal_i64("^1 and ^2 together match nothing", semver.highest_matching(versions, impossible), -1)
+}
+
+parse_accepts_a_plain_triple_and_a_leading_v()
+parse_rejects_malformed_versions()
+compare_orders_by_major_then_minor_then_patch()
+an_exact_constraint_matches_only_its_own_version()
+a_caret_constraint_admits_the_same_major_and_nothing_higher()
+below_one_zero_a_caret_constraint_pins_the_minor()
+unsupported_constraint_syntax_is_rejected_rather_than_widened()
+highest_matching_picks_the_greatest_version_satisfying_every_constraint()
+t.report("semver")

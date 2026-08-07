@@ -1,0 +1,77 @@
+mode systems
+
+# The content hash of a vendored package.
+#
+# The hash covers what actually lands on disk, not the git object it came from.
+# A commit hash already records what git thought it was sending; this records
+# what arrived, which is the thing the build reads. If a mirror or a cache hands
+# over different bytes under the same commit, this is what notices.
+
+import "strutil.tw" as s
+import "sha256.tw" as sha
+
+let HASH_PREFIX = "sha256:"
+
+# canonical builds the byte string that gets hashed: a header, the file count,
+# then for each file its path length, path, size and contents, in sorted path
+# order.
+#
+# The length prefixes are the part that matters. Without them, a tree with a
+# file "ab" containing "c" and a tree with a file "a" containing "bc" serialise
+# to the same bytes and collide, which would let one package be swapped for
+# another under an unchanged hash.
+#
+# File modes are not covered. They do not survive a Windows checkout, and a hash
+# that passes on one platform and fails on another is worse than one that
+# ignores the field.
+fn canonical(paths: Arr[Str], contents: Arr[Str]) -> Str {
+  let out = "spool-tree-v1\n" + s.i64_to_str(len(paths)) + "\n"
+  let i = 0
+  while i < len(paths) {
+    let p = paths[i]
+    out = out + s.i64_to_str(len(p)) + " " + p + " " + s.i64_to_str(len(contents[i])) + "\n" + contents[i]
+    i = i + 1
+  }
+  out
+}
+
+# hash_tree hashes a package's files. paths must already be sorted and must use
+# `/` as the separator on every platform, so the same package hashes the same
+# on Windows and Linux; sort_tree below is what callers use to guarantee it.
+fn hash_tree(paths: Arr[Str], contents: Arr[Str]) -> Str {
+  HASH_PREFIX + sha.hash_str(canonical(paths, contents))
+}
+
+# is_excluded drops VCS metadata, which differs between a clone and an archive
+# of the same commit and would otherwise make the hash depend on how the package
+# was fetched rather than on what it contains.
+fn is_excluded(path: Str) -> Bool {
+  let parts = s.split_byte(path, s.B_SLASH)
+  let i = 0
+  while i < len(parts) {
+    let p = parts[i]
+    if p == ".git" or p == ".hg" or p == ".svn" {
+      return true
+    }
+    i = i + 1
+  }
+  false
+}
+
+fn is_hash(v: Str) -> Bool {
+  s.starts_with(v, HASH_PREFIX) and len(v) == len(HASH_PREFIX) + 64
+}
+
+# verify compares a computed hash against a locked one and returns an empty
+# string on success. The message shows both digests, because a mismatch without
+# them tells the user something is wrong and nothing about what.
+fn verify(name: Str, got: Str, want: Str) -> Str {
+  if not is_hash(want) {
+    return "the lockfile hash for " + name + " is not a sha256 digest, so spool cannot verify it"
+  }
+  if got == want {
+    return ""
+  }
+  "integrity check failed for " + name + "\n  locked:  " + want + "\n  fetched: " + got
+    + "\nthe contents under that commit are not what the lockfile recorded"
+}

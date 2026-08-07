@@ -1,0 +1,343 @@
+mode systems
+
+# spool.toml: the file that declares a twill package and what it depends on.
+
+import "strutil.tw" as s
+import "toml.tw" as toml
+import "semver.tw" as semver
+
+let MANIFEST_NAME = "spool.toml"
+
+# Dep is one declared dependency. v0.1 has exactly one kind of source, a git
+# repository, so `git` is a required field rather than one arm of a source
+# union. Adding a registry later means adding a field, not reshaping this type.
+struct Dep {
+  name: Str,
+  version: Str,
+  git: Str,
+}
+
+struct Manifest {
+  name: Str,
+  version: Str,
+  # entry is the file inside the package that importers are meant to import.
+  # twill has no notion of a package entry point, so spool records it and
+  # echoes it back in `spool list`; it does not enforce it.
+  entry: Str,
+  # deps is kept sorted by name, so everything derived from it, above all the
+  # lockfile, is independent of the order the manifest happened to list.
+  deps: Arr[Dep],
+  err: Str,
+}
+
+fn error_manifest(msg: Str) -> Manifest {
+  Manifest { name: "", version: "", entry: "", deps: [], err: msg }
+}
+
+# validate_name keeps a package name to characters that are safe as a single
+# path component, because the name becomes a directory under the vendor
+# directory and part of an import path inside twill source. Rejecting the rest
+# here means nothing downstream has to defend against "..".
+fn validate_name(name: Str) -> Str {
+  if len(name) == 0 {
+    return "empty package name"
+  }
+  if len(name) > 64 {
+    return "package name " + name + " is longer than 64 characters"
+  }
+  let i = 0
+  while i < len(name) {
+    let b = name[i]
+    if s.is_lower(b) or s.is_digit(b) {
+      i = i + 1
+      continue
+    }
+    if b == s.B_UNDER or b == s.B_MINUS {
+      if i == 0 {
+        return "package name " + name + " must start with a letter or digit"
+      }
+      i = i + 1
+      continue
+    }
+    return "package name " + name + " may only contain lowercase letters, digits, `_` and `-`"
+  }
+  ""
+}
+
+# validate_entry keeps the entry path inside the package and pointed at twill
+# source. `.ra` was the extension before the language was renamed to twill; it
+# is rejected by name so the error explains itself instead of reading as a
+# generic "not a .tw file".
+fn validate_entry(entry: Str) -> Str {
+  if s.ends_with(entry, ".ra") {
+    return "entry " + entry + " uses the old `.ra` extension; twill source is `.tw`"
+  }
+  if not s.ends_with(entry, ".tw") {
+    return "entry " + entry + " must be a `.tw` file"
+  }
+  if entry[0] == s.B_SLASH {
+    return "entry " + entry + " must be relative to the package root"
+  }
+  if s.starts_with(entry, "../") or entry == ".." {
+    return "entry " + entry + " escapes the package root"
+  }
+  ""
+}
+
+fn find_dep(m: Manifest, name: Str) -> I64 {
+  let i = 0
+  while i < len(m.deps) {
+    if m.deps[i].name == name {
+      return i
+    }
+    i = i + 1
+  }
+  -1
+}
+
+# sort_deps is an insertion sort by name. Dependency lists are tens of entries
+# at most, so the quadratic cost is invisible next to reading the file.
+fn sort_deps(deps: Arr[Dep]) -> Arr[Dep] {
+  let out: Arr[Dep] = []
+  let i = 0
+  while i < len(deps) {
+    push(out, deps[i])
+    i = i + 1
+  }
+  let j = 1
+  while j < len(out) {
+    let cur = out[j]
+    let k = j - 1
+    while k >= 0 and s.compare_str(out[k].name, cur.name) > 0 {
+      out[k + 1] = out[k]
+      k = k - 1
+    }
+    out[k + 1] = cur
+    j = j + 1
+  }
+  out
+}
+
+fn parse(src: Str) -> Manifest {
+  let doc = toml.parse(src)
+  if len(doc.err) > 0 {
+    return error_manifest(doc.err)
+  }
+
+  let m = Manifest { name: "", version: "", entry: "", deps: [], err: "" }
+  let i = 0
+  while i < len(doc.pairs) {
+    let p = doc.pairs[i]
+    i = i + 1
+
+    if p.table == "" {
+      if p.is_table {
+        return error_manifest("key " + p.key + " takes a string, not a table")
+      }
+      if p.key == "name" {
+        m.name = p.value
+        continue
+      }
+      if p.key == "version" {
+        m.version = p.value
+        continue
+      }
+      if p.key == "entry" {
+        m.entry = p.value
+        continue
+      }
+      return error_manifest("unknown top-level key " + p.key)
+    }
+
+    if p.table != "dependencies" {
+      return error_manifest("unknown table [" + p.table + "]")
+    }
+    if not p.is_table {
+      return error_manifest("dependency " + p.key + " must be a table like { version = \"^1.0.0\", git = \"...\" }")
+    }
+    let name_err = validate_name(p.key)
+    if len(name_err) > 0 {
+      return error_manifest(name_err)
+    }
+    let d = Dep { name: p.key, version: "", git: "" }
+    let keys = keys(p.fields)
+    let k = 0
+    while k < len(keys) {
+      let key = keys[k]
+      k = k + 1
+      if key == "version" {
+        d.version = p.fields[key]
+        continue
+      }
+      if key == "git" {
+        d.git = p.fields[key]
+        continue
+      }
+      return error_manifest("dependency " + d.name + ": unknown key " + key)
+    }
+    if len(d.version) == 0 {
+      return error_manifest("dependency " + d.name + ": missing `version`")
+    }
+    let c = semver.parse_constraint(d.version)
+    if not c.ok {
+      return error_manifest("dependency " + d.name + ": " + d.version + " is not a version or a `^` range")
+    }
+    if len(d.git) == 0 {
+      return error_manifest("dependency " + d.name + ": missing `git`; v0.1 of spool resolves git sources only, there is no registry")
+    }
+    if find_dep(m, d.name) >= 0 {
+      return error_manifest("dependency " + d.name + " is declared twice")
+    }
+    push(m.deps, d)
+  }
+
+  if len(m.name) == 0 {
+    return error_manifest("missing required key `name`")
+  }
+  let name_err = validate_name(m.name)
+  if len(name_err) > 0 {
+    return error_manifest(name_err)
+  }
+  if len(m.version) == 0 {
+    return error_manifest("missing required key `version`")
+  }
+  if not semver.parse(m.version).ok {
+    return error_manifest("package version " + m.version + " is not major.minor.patch")
+  }
+  if len(m.entry) > 0 {
+    let entry_err = validate_entry(m.entry)
+    if len(entry_err) > 0 {
+      return error_manifest(entry_err)
+    }
+  }
+  m.deps = sort_deps(m.deps)
+  m
+}
+
+# render writes a manifest back out, sorted and in a fixed field order, so the
+# same manifest always produces the same bytes. The cost is that comments and
+# hand-formatting are lost, which is why `spool add` edits the text instead;
+# see add_dep. render is for `spool init` and for tests.
+fn render(m: Manifest) -> Str {
+  let out = "name = " + toml.quote(m.name) + "\n"
+  out = out + "version = " + toml.quote(m.version) + "\n"
+  if len(m.entry) > 0 {
+    out = out + "entry = " + toml.quote(m.entry) + "\n"
+  }
+  let deps = sort_deps(m.deps)
+  if len(deps) > 0 {
+    out = out + "\n[dependencies]\n"
+    let i = 0
+    while i < len(deps) {
+      out = out + dep_line(deps[i]) + "\n"
+      i = i + 1
+    }
+  }
+  out
+}
+
+fn dep_line(d: Dep) -> Str {
+  d.name + " = { version = " + toml.quote(d.version) + ", git = " + toml.quote(d.git) + " }"
+}
+
+# add_dep inserts or replaces one dependency line in existing manifest text,
+# leaving every other line untouched. Rewriting the whole file from the parsed
+# struct would be shorter but would throw away the author's comments and
+# spacing, and a tool that reformats your file as a side effect of adding one
+# line does not get used twice.
+fn add_dep(src: Str, d: Dep) -> Str {
+  let lines = s.split_lines(src)
+  let table = ""
+  let deps_start = -1
+  let deps_end = -1
+  let i = 0
+  while i < len(lines) {
+    let line = s.trim(toml.strip_comment(lines[i]))
+    if len(line) > 0 and line[0] == s.B_LBRACKET and line[len(line) - 1] == s.B_RBRACKET {
+      if table == "dependencies" and deps_end < 0 {
+        deps_end = i
+      }
+      table = s.trim(line[1:len(line) - 1])
+      if table == "dependencies" {
+        deps_start = i
+      }
+      i = i + 1
+      continue
+    }
+    if table == "dependencies" and len(line) > 0 {
+      let eq = s.index_of_byte(line, s.B_EQ)
+      if eq >= 0 and toml.parse_key(line[0:eq]) == d.name {
+        lines[i] = dep_line(d)
+        return s.join(lines, "\n")
+      }
+    }
+    i = i + 1
+  }
+
+  if deps_start < 0 {
+    let body = src
+    while s.ends_with(body, "\n") {
+      body = s.trim_suffix(body, "\n")
+    }
+    return body + "\n\n[dependencies]\n" + dep_line(d) + "\n"
+  }
+  if deps_end < 0 {
+    deps_end = len(lines)
+  }
+  # Insert after the last non-blank line of the table, so a new entry does not
+  # land in the blank space before the next table.
+  let at = deps_start + 1
+  let j = deps_start + 1
+  while j < deps_end {
+    if len(s.trim(lines[j])) > 0 {
+      at = j + 1
+    }
+    j = j + 1
+  }
+  let out: Arr[Str] = []
+  let k = 0
+  while k < len(lines) {
+    if k == at {
+      push(out, dep_line(d))
+    }
+    push(out, lines[k])
+    k = k + 1
+  }
+  if at >= len(lines) {
+    push(out, dep_line(d))
+  }
+  s.join(out, "\n")
+}
+
+# remove_dep deletes a dependency line. The returned string is prefixed with a
+# status byte: "!" when the dependency was not declared, " " otherwise. The
+# subset has no way to return two values; see docs/needs.md.
+fn remove_dep(src: Str, name: Str) -> Str {
+  let lines = s.split_lines(src)
+  let table = ""
+  let i = 0
+  while i < len(lines) {
+    let line = s.trim(toml.strip_comment(lines[i]))
+    if len(line) > 0 and line[0] == s.B_LBRACKET and line[len(line) - 1] == s.B_RBRACKET {
+      table = s.trim(line[1:len(line) - 1])
+      i = i + 1
+      continue
+    }
+    if table == "dependencies" and len(line) > 0 {
+      let eq = s.index_of_byte(line, s.B_EQ)
+      if eq >= 0 and toml.parse_key(line[0:eq]) == name {
+        let out: Arr[Str] = []
+        let k = 0
+        while k < len(lines) {
+          if k != i {
+            push(out, lines[k])
+          }
+          k = k + 1
+        }
+        return " " + s.join(out, "\n")
+      }
+    }
+    i = i + 1
+  }
+  "!"
+}

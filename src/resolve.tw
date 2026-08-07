@@ -1,0 +1,249 @@
+mode systems
+
+# Turning declared dependencies into an exact set of versions.
+#
+# resolve is a pure function of a manifest and a Catalog. Nothing in this file
+# reads a file, runs git or touches a network: the catalog is filled in first by
+# whoever is calling, which is what makes the whole algorithm testable from a
+# literal table of versions. That separation is deliberate and is the single
+# most important structural decision in spool.
+
+import "strutil.tw" as s
+import "semver.tw" as semver
+import "manifest.tw" as manifest
+
+# Catalog is the universe of packages the resolver is allowed to see. Keys are
+# git URLs.
+#
+# `versions` maps a git URL to a comma-separated list of published versions, and
+# `deps` maps "url@version" to the rendered [dependencies] table of that
+# package's own spool.toml. Both are strings because the subset has no nested
+# containers beyond Dict[Str, V]; see docs/needs.md, this type is the clearest
+# evidence for wanting Dict values that are not scalars.
+struct Catalog {
+  versions: Dict[Str, Str],
+  deps: Dict[Str, Str],
+}
+
+struct Resolved {
+  name: Str,
+  version: Str,
+  git: Str,
+}
+
+struct Resolution {
+  packages: Arr[Resolved],
+  err: Str,
+}
+
+fn error_resolution(msg: Str) -> Resolution {
+  Resolution { packages: [], err: msg }
+}
+
+fn catalog_key(git: Str, version: Str) -> Str {
+  git + "@" + version
+}
+
+fn catalog_versions(cat: Catalog, git: Str) -> Arr[semver.Version] {
+  let out: Arr[semver.Version] = []
+  if not has(cat.versions, git) {
+    return out
+  }
+  let raw = s.split_byte(cat.versions[git], s.B_COMMA)
+  let i = 0
+  while i < len(raw) {
+    let v = semver.parse(s.trim(raw[i]))
+    if v.ok {
+      push(out, v)
+    }
+    i = i + 1
+  }
+  out
+}
+
+# catalog_deps parses the dependency table a catalog holds for one version. A
+# package whose entry is missing is treated as having no dependencies, because a
+# leaf package is the common case and requiring an explicit empty entry would
+# make every catalog, including the ones in tests, noisier for nothing.
+fn catalog_deps(cat: Catalog, git: Str, version: Str) -> manifest.Manifest {
+  let key = catalog_key(git, version)
+  if not has(cat.deps, key) {
+    return manifest.parse("name = \"unknown\"\nversion = \"" + version + "\"\n")
+  }
+  manifest.parse(cat.deps[key])
+}
+
+# resolve picks one version per package name that satisfies every constraint
+# naming it, preferring the highest.
+#
+# One version per name, not one per subtree. twill's `import` resolves a path to
+# a file, and a plain import drops that file's definitions into the importing
+# scope, so two copies of a package at different versions would either collide
+# in scope or hand two callers different definitions of the same function under
+# the same name. A flat graph makes that impossible. The cost is that two
+# dependencies which genuinely disagree fail to resolve instead of both getting
+# what they asked for, and for this language that is the right way round.
+fn resolve(root: manifest.Manifest, cat: Catalog) -> Resolution {
+  # names is the packages under consideration, in insertion order; the sort at
+  # the end is what makes the output order independent of it.
+  let names: Arr[Str] = []
+  let gits: Dict[Str, Str] = {}
+  # constraint_texts holds every constraint on a name, joined by "|", each
+  # tagged with who asked for it so a failure can name the requester.
+  let constraint_texts: Dict[Str, Str] = {}
+  let chosen: Dict[Str, Str] = {}
+
+  let err = add_deps(root.name, root.deps, names, gits, constraint_texts)
+  if len(err) > 0 {
+    return error_resolution(err)
+  }
+
+  # Each pass picks the best version for every name under the constraints known
+  # so far, then pulls in that version's own dependencies. A newly discovered
+  # constraint can invalidate an earlier choice, so this repeats until a pass
+  # changes nothing. The bound guards against a pathological cycle of
+  # constraints rather than marking an expected limit.
+  let pass = 0
+  while pass < 100 {
+    let changed = false
+    let ordered = s.sort_strs(names)
+    let i = 0
+    while i < len(ordered) {
+      let name = ordered[i]
+      i = i + 1
+      let git = gits[name]
+      let versions = catalog_versions(cat, git)
+      let cs = constraints_of(constraint_texts[name])
+      let best = semver.highest_matching(versions, cs)
+      if best < 0 {
+        return error_resolution(unsatisfiable(name, constraint_texts[name], versions))
+      }
+      let picked = semver.to_str(versions[best])
+      if has(chosen, name) and chosen[name] == picked {
+        continue
+      }
+      chosen[name] = picked
+      changed = true
+
+      let m = catalog_deps(cat, git, picked)
+      if len(m.err) > 0 {
+        return error_resolution("package " + name + " " + picked + ": " + m.err)
+      }
+      let sub_err = add_deps(name + " " + picked, m.deps, names, gits, constraint_texts)
+      if len(sub_err) > 0 {
+        return error_resolution(sub_err)
+      }
+    }
+    if not changed {
+      pass = 100
+    } else {
+      pass = pass + 1
+      if pass == 100 {
+        return error_resolution("dependency resolution did not settle after 100 passes; the constraints are cyclic")
+      }
+    }
+  }
+
+  let out: Arr[Resolved] = []
+  let ordered = s.sort_strs(names)
+  let k = 0
+  while k < len(ordered) {
+    let name = ordered[k]
+    push(out, Resolved { name: name, version: chosen[name], git: gits[name] })
+    k = k + 1
+  }
+  Resolution { packages: out, err: "" }
+}
+
+# add_deps records each dependency's constraint and git source, rejecting one
+# name that arrives with two different sources. Two repositories claiming the
+# same package name is not a version conflict and must not be reported as one:
+# it means somebody is depending on a fork, and silently picking either is how a
+# supply chain gets substituted.
+fn add_deps(from: Str, deps: Arr[manifest.Dep], names: Arr[Str], gits: Dict[Str, Str],
+            constraint_texts: Dict[Str, Str]) -> Str {
+  let i = 0
+  while i < len(deps) {
+    let d = deps[i]
+    i = i + 1
+    if has(gits, d.name) {
+      if gits[d.name] != d.git {
+        return "package " + d.name + " is declared with two different git sources: "
+          + gits[d.name] + " and " + d.git + " (from " + from + ")"
+      }
+    } else {
+      gits[d.name] = d.git
+      push(names, d.name)
+      constraint_texts[d.name] = ""
+    }
+    let tag = d.version + " (required by " + from + ")"
+    if len(constraint_texts[d.name]) == 0 {
+      constraint_texts[d.name] = tag
+    } else {
+      if not s.contains(constraint_texts[d.name], tag) {
+        constraint_texts[d.name] = constraint_texts[d.name] + "|" + tag
+      }
+    }
+  }
+  ""
+}
+
+fn constraints_of(joined: Str) -> Arr[semver.Constraint] {
+  let out: Arr[semver.Constraint] = []
+  let parts = s.split_byte(joined, "|"[0])
+  let i = 0
+  while i < len(parts) {
+    let text = s.trim(parts[i])
+    let space = s.index_of_byte(text, s.B_SPACE)
+    if space > 0 {
+      text = text[0:space]
+    }
+    if len(text) > 0 {
+      let c = semver.parse_constraint(text)
+      if c.ok {
+        push(out, c)
+      }
+    }
+    i = i + 1
+  }
+  out
+}
+
+# unsatisfiable reports which requirements collided and what was on offer.
+# "no version found" without either is an error a user cannot act on.
+fn unsatisfiable(name: Str, joined: Str, versions: Arr[semver.Version]) -> Str {
+  let wants = s.sort_strs(s.split_byte(joined, "|"[0]))
+  let have: Arr[Str] = []
+  let sorted = sort_versions(versions)
+  let i = 0
+  while i < len(sorted) {
+    push(have, semver.to_str(sorted[i]))
+    i = i + 1
+  }
+  if len(have) == 0 {
+    return "package " + name + " publishes no versions; needed " + s.join(wants, " and ")
+  }
+  "no version of " + name + " satisfies " + s.join(wants, " and ")
+    + "; available: " + s.join(have, ", ")
+}
+
+fn sort_versions(vs: Arr[semver.Version]) -> Arr[semver.Version] {
+  let out: Arr[semver.Version] = []
+  let i = 0
+  while i < len(vs) {
+    push(out, vs[i])
+    i = i + 1
+  }
+  let j = 1
+  while j < len(out) {
+    let cur = out[j]
+    let k = j - 1
+    while k >= 0 and semver.compare(out[k], cur) > 0 {
+      out[k + 1] = out[k]
+      k = k - 1
+    }
+    out[k + 1] = cur
+    j = j + 1
+  }
+  out
+}

@@ -1,0 +1,157 @@
+mode systems
+
+# The resolver is a pure function of a manifest and a catalog, so every case
+# here is a literal table of versions. Nothing in this file touches git, a
+# network or the filesystem, which is the whole reason resolve.tw is separate
+# from vendor.tw.
+
+import "harness.tw" as t
+import "../src/strutil.tw" as s
+import "../src/manifest.tw" as manifest
+import "../src/resolve.tw" as resolve
+
+fn root_manifest(deps: Str) -> manifest.Manifest {
+  manifest.parse("name = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\n" + deps)
+}
+
+fn pkg(name: Str, version: Str, deps: Str) -> Str {
+  "name = \"" + name + "\"\nversion = \"" + version + "\"\n\n[dependencies]\n" + deps
+}
+
+fn names_of(r: resolve.Resolution) -> Str {
+  let parts: Arr[Str] = []
+  let i = 0
+  while i < len(r.packages) {
+    push(parts, r.packages[i].name + "@" + r.packages[i].version)
+    i = i + 1
+  }
+  s.join(parts, " ")
+}
+
+fn resolve_picks_the_highest_version_satisfying_a_caret_constraint() {
+  let cat = resolve.Catalog { versions: {}, deps: {} }
+  cat.versions["git://a"] = "1.0.0,1.4.2,2.0.0"
+  let r = resolve.resolve(root_manifest("a = { version = \"^1.0.0\", git = \"git://a\" }\n"), cat)
+  t.equal_str("resolution succeeds", r.err, "")
+  t.equal_str("^1.0.0 picks the highest matching version", names_of(r), "a@1.4.2")
+}
+
+fn resolve_pulls_in_transitive_dependencies() {
+  let cat = resolve.Catalog { versions: {}, deps: {} }
+  cat.versions["git://a"] = "1.0.0"
+  cat.versions["git://b"] = "1.0.0,1.1.0"
+  cat.versions["git://c"] = "1.0.0"
+  cat.deps["git://a@1.0.0"] = pkg("a", "1.0.0", "b = { version = \"^1.0.0\", git = \"git://b\" }\n")
+  cat.deps["git://b@1.1.0"] = pkg("b", "1.1.0", "c = { version = \"1.0.0\", git = \"git://c\" }\n")
+  let r = resolve.resolve(root_manifest("a = { version = \"1.0.0\", git = \"git://a\" }\n"), cat)
+  t.equal_str("resolution succeeds", r.err, "")
+  t.equal_str("the transitive graph is resolved", names_of(r), "a@1.0.0 b@1.1.0 c@1.0.0")
+}
+
+fn resolve_narrows_an_earlier_choice_when_a_later_constraint_arrives() {
+  # a would take b 1.9.0, but c pins b to 1.2.0. The resolver has to revisit b
+  # rather than keep its first pick.
+  let cat = resolve.Catalog { versions: {}, deps: {} }
+  cat.versions["git://a"] = "1.0.0"
+  cat.versions["git://b"] = "1.0.0,1.2.0,1.9.0"
+  cat.versions["git://c"] = "1.0.0"
+  cat.deps["git://a@1.0.0"] = pkg("a", "1.0.0",
+    "b = { version = \"^1.0.0\", git = \"git://b\" }\nc = { version = \"1.0.0\", git = \"git://c\" }\n")
+  cat.deps["git://c@1.0.0"] = pkg("c", "1.0.0", "b = { version = \"1.2.0\", git = \"git://b\" }\n")
+  let r = resolve.resolve(root_manifest("a = { version = \"1.0.0\", git = \"git://a\" }\n"), cat)
+  t.equal_str("resolution succeeds", r.err, "")
+  t.equal_str("a later constraint narrows an earlier choice", names_of(r), "a@1.0.0 b@1.2.0 c@1.0.0")
+}
+
+fn resolve_is_deterministic_across_repeated_runs() {
+  let cat = resolve.Catalog { versions: {}, deps: {} }
+  cat.versions["git://a"] = "1.0.0"
+  cat.versions["git://b"] = "2.0.0"
+  cat.versions["git://c"] = "1.0.0,1.5.0"
+  cat.deps["git://a@1.0.0"] = pkg("a", "1.0.0", "c = { version = \"^1.0.0\", git = \"git://c\" }\n")
+  cat.deps["git://b@2.0.0"] = pkg("b", "2.0.0", "c = { version = \"^1.0.0\", git = \"git://c\" }\n")
+  let root = root_manifest("a = { version = \"1.0.0\", git = \"git://a\" }\n"
+    + "b = { version = \"2.0.0\", git = \"git://b\" }\n")
+  let want = names_of(resolve.resolve(root, cat))
+  t.equal_str("the diamond resolves as expected", want, "a@1.0.0 b@2.0.0 c@1.5.0")
+  let i = 0
+  while i < 20 {
+    t.equal_str("run " + s.i64_to_str(i) + " matches run 0", names_of(resolve.resolve(root, cat)), want)
+    i = i + 1
+  }
+}
+
+fn resolve_fails_when_two_dependencies_require_incompatible_majors() {
+  let cat = resolve.Catalog { versions: {}, deps: {} }
+  cat.versions["git://a"] = "1.0.0"
+  cat.versions["git://b"] = "1.0.0"
+  cat.versions["git://c"] = "1.0.0,2.0.0"
+  cat.deps["git://a@1.0.0"] = pkg("a", "1.0.0", "c = { version = \"^1.0.0\", git = \"git://c\" }\n")
+  cat.deps["git://b@1.0.0"] = pkg("b", "1.0.0", "c = { version = \"^2.0.0\", git = \"git://c\" }\n")
+  let r = resolve.resolve(root_manifest("a = { version = \"1.0.0\", git = \"git://a\" }\n"
+    + "b = { version = \"1.0.0\", git = \"git://b\" }\n"), cat)
+  t.check("incompatible majors do not resolve", len(r.err) > 0)
+  t.check("the error names the first constraint", s.contains(r.err, "^1.0.0"))
+  t.check("the error names the second constraint", s.contains(r.err, "^2.0.0"))
+  t.check("the error lists what was available", s.contains(r.err, "1.0.0, 2.0.0"))
+}
+
+fn resolve_names_the_dependency_responsible_for_a_failed_constraint() {
+  let cat = resolve.Catalog { versions: {}, deps: {} }
+  cat.versions["git://a"] = "1.0.0"
+  cat.versions["git://c"] = "1.0.0"
+  cat.deps["git://a@1.0.0"] = pkg("a", "1.0.0", "c = { version = \"^9.0.0\", git = \"git://c\" }\n")
+  let r = resolve.resolve(root_manifest("a = { version = \"1.0.0\", git = \"git://a\" }\n"), cat)
+  t.check("an impossible transitive constraint fails", len(r.err) > 0)
+  t.check("the error names the requester", s.contains(r.err, "required by a 1.0.0"))
+}
+
+fn resolve_rejects_one_package_name_with_two_git_sources() {
+  let cat = resolve.Catalog { versions: {}, deps: {} }
+  cat.versions["git://a"] = "1.0.0"
+  cat.versions["git://c"] = "1.0.0"
+  cat.versions["git://c-fork"] = "1.0.0"
+  cat.deps["git://a@1.0.0"] = pkg("a", "1.0.0", "c = { version = \"1.0.0\", git = \"git://c-fork\" }\n")
+  let r = resolve.resolve(root_manifest("a = { version = \"1.0.0\", git = \"git://a\" }\n"
+    + "c = { version = \"1.0.0\", git = \"git://c\" }\n"), cat)
+  t.check("a name served by two repositories is rejected", len(r.err) > 0)
+  t.check("the error says what happened", s.contains(r.err, "two different git sources"))
+}
+
+fn resolve_handles_a_cycle_without_looping() {
+  let cat = resolve.Catalog { versions: {}, deps: {} }
+  cat.versions["git://a"] = "1.0.0"
+  cat.versions["git://b"] = "1.0.0"
+  cat.deps["git://a@1.0.0"] = pkg("a", "1.0.0", "b = { version = \"1.0.0\", git = \"git://b\" }\n")
+  cat.deps["git://b@1.0.0"] = pkg("b", "1.0.0", "a = { version = \"1.0.0\", git = \"git://a\" }\n")
+  let r = resolve.resolve(root_manifest("a = { version = \"1.0.0\", git = \"git://a\" }\n"), cat)
+  t.equal_str("a dependency cycle resolves", r.err, "")
+  t.equal_str("both packages are in the result", names_of(r), "a@1.0.0 b@1.0.0")
+}
+
+fn a_package_that_publishes_nothing_is_reported_as_such() {
+  let cat = resolve.Catalog { versions: {}, deps: {} }
+  cat.versions["git://a"] = ""
+  let r = resolve.resolve(root_manifest("a = { version = \"^1.0.0\", git = \"git://a\" }\n"), cat)
+  t.check("a package with no versions fails to resolve", len(r.err) > 0)
+  t.check("the error says the package publishes nothing", s.contains(r.err, "publishes no versions"))
+}
+
+fn a_project_with_no_dependencies_resolves_to_nothing() {
+  let cat = resolve.Catalog { versions: {}, deps: {} }
+  let r = resolve.resolve(manifest.parse("name = \"app\"\nversion = \"0.1.0\"\n"), cat)
+  t.equal_str("an empty project resolves", r.err, "")
+  t.equal_i64("an empty project has no packages", len(r.packages), 0)
+}
+
+resolve_picks_the_highest_version_satisfying_a_caret_constraint()
+resolve_pulls_in_transitive_dependencies()
+resolve_narrows_an_earlier_choice_when_a_later_constraint_arrives()
+resolve_is_deterministic_across_repeated_runs()
+resolve_fails_when_two_dependencies_require_incompatible_majors()
+resolve_names_the_dependency_responsible_for_a_failed_constraint()
+resolve_rejects_one_package_name_with_two_git_sources()
+resolve_handles_a_cycle_without_looping()
+a_package_that_publishes_nothing_is_reported_as_such()
+a_project_with_no_dependencies_resolves_to_nothing()
+t.report("resolve")

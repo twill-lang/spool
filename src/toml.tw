@@ -1,0 +1,260 @@
+mode systems
+
+# A reader for the slice of TOML that spool.toml uses.
+#
+# Hand-rolled, because the toolchain policy is zero third-party dependencies and
+# because the subset below is small enough to audit in one sitting. The cost is
+# that spool.toml is not TOML: it is a file that a TOML parser will read and
+# that this reader will read, and the two agree only inside the subset. That is
+# stated in the README rather than left for someone to discover.
+#
+# The subset:
+#   - # comments, on their own line or trailing a value
+#   - [table] headers, one level deep
+#   - key = "basic string" and key = 'literal string'
+#   - key = { a = "x", b = "y" } inline tables of strings, on one line
+#
+# Anything else is a parse error naming the line. Reporting is better than
+# silently dropping a key the author expected to take effect, because a manifest
+# that half-parses is how a build ends up depending on something nobody
+# declared.
+
+import "strutil.tw" as s
+
+# Pair is one key and its value, with `fields` holding an inline table's
+# contents when `is_table` is set. A subset with no sum types has no better way
+# to say "one of two shapes"; see docs/needs.md.
+struct Pair {
+  table: Str,
+  key: Str,
+  value: Str,
+  fields: Dict[Str, Str],
+  is_table: Bool,
+  line: I64,
+}
+
+struct Doc {
+  pairs: Arr[Pair],
+  err: Str,
+}
+
+fn error_doc(line: I64, msg: Str) -> Doc {
+  Doc { pairs: [], err: "line " + s.i64_to_str(line) + ": " + msg }
+}
+
+# strip_comment removes a trailing # comment, ignoring a # inside a string. A
+# git URL with a fragment is the case that makes this necessary rather than
+# tidy.
+fn strip_comment(line: Str) -> Str {
+  let quote = 0
+  let i = 0
+  while i < len(line) {
+    let b = line[i]
+    if quote != 0 {
+      if b == quote {
+        quote = 0
+      }
+    } else {
+      if b == s.B_QUOTE or b == s.B_APOS {
+        quote = b
+      } else {
+        if b == s.B_HASH {
+          return line[0:i]
+        }
+      }
+    }
+    i = i + 1
+  }
+  line
+}
+
+# parse_key accepts a bare key only. Dotted and quoted keys are rejected because
+# spool.toml has no use for either and accepting them would mean deciding what
+# a dotted key means in a one-level document.
+fn parse_key(raw: Str) -> Str {
+  let key = s.trim(raw)
+  if len(key) == 0 {
+    return ""
+  }
+  let i = 0
+  while i < len(key) {
+    let b = key[i]
+    let ok = s.is_lower(b) or s.is_upper(b) or s.is_digit(b) or b == s.B_UNDER or b == s.B_MINUS
+    if not ok {
+      return ""
+    }
+    i = i + 1
+  }
+  key
+}
+
+# unquote reads a quoted string. Escape sequences are not interpreted: a package
+# name, version or git URL never needs one, and refusing to read a backslash
+# means a Windows-style path in a manifest reads back byte for byte. The
+# returned string is prefixed with a status byte because the subset cannot
+# return two values; "!" means failure, " " means success.
+fn unquote(raw: Str) -> Str {
+  let text = s.trim(raw)
+  if len(text) < 2 {
+    return "!"
+  }
+  let q = text[0]
+  if q != s.B_QUOTE and q != s.B_APOS {
+    return "!"
+  }
+  if text[len(text) - 1] != q {
+    return "!"
+  }
+  let body = text[1:len(text) - 1]
+  if s.index_of_byte(body, q) >= 0 {
+    return "!"
+  }
+  if q == s.B_QUOTE and s.contains(body, "\\") {
+    return "!"
+  }
+  " " + body
+}
+
+fn unquote_ok(r: Str) -> Bool {
+  r[0] == s.B_SPACE
+}
+
+fn unquote_value(r: Str) -> Str {
+  r[1:len(r)]
+}
+
+# split_fields splits an inline table body on commas that sit outside quotes, so
+# a comma inside a URL does not split the field.
+fn split_fields(body: Str) -> Arr[Str] {
+  let out: Arr[Str] = []
+  let quote = 0
+  let start = 0
+  let i = 0
+  while i < len(body) {
+    let b = body[i]
+    if quote != 0 {
+      if b == quote {
+        quote = 0
+      }
+    } else {
+      if b == s.B_QUOTE or b == s.B_APOS {
+        quote = b
+      } else {
+        if b == s.B_COMMA {
+          push(out, body[start:i])
+          start = i + 1
+        }
+      }
+    }
+    i = i + 1
+  }
+  push(out, body[start:len(body)])
+  out
+}
+
+fn parse(src: Str) -> Doc {
+  let doc = Doc { pairs: [], err: "" }
+  let lines = s.split_lines(src)
+  let table = ""
+  let n = 0
+  while n < len(lines) {
+    let line_no = n + 1
+    let line = s.trim(strip_comment(lines[n]))
+    n = n + 1
+    if len(line) == 0 {
+      continue
+    }
+
+    if line[0] == s.B_LBRACKET {
+      if line[len(line) - 1] != s.B_RBRACKET {
+        return error_doc(line_no, "unterminated table header")
+      }
+      let name = s.trim(line[1:len(line) - 1])
+      if len(name) == 0 {
+        return error_doc(line_no, "empty table header")
+      }
+      if s.index_of_byte(name, s.B_LBRACKET) >= 0 or s.index_of_byte(name, s.B_RBRACKET) >= 0 {
+        return error_doc(line_no, "spool.toml does not use array-of-table headers")
+      }
+      table = name
+      continue
+    }
+
+    let eq = s.index_of_byte(line, s.B_EQ)
+    if eq < 0 {
+      return error_doc(line_no, "expected `key = value`, got " + line)
+    }
+    let key = parse_key(line[0:eq])
+    if len(key) == 0 {
+      return error_doc(line_no, "expected a bare key before `=`")
+    }
+    let i = 0
+    while i < len(doc.pairs) {
+      if doc.pairs[i].table == table and doc.pairs[i].key == key {
+        return error_doc(line_no, "duplicate key " + key)
+      }
+      i = i + 1
+    }
+
+    let raw = s.trim(line[eq + 1:len(line)])
+    if len(raw) == 0 {
+      return error_doc(line_no, "key " + key + " has no value")
+    }
+
+    if raw[0] == s.B_LBRACE {
+      if raw[len(raw) - 1] != s.B_RBRACE {
+        return error_doc(line_no, "unterminated inline table (spool.toml requires it on one line)")
+      }
+      let fields: Dict[Str, Str] = {}
+      let body = s.trim(raw[1:len(raw) - 1])
+      if len(body) > 0 {
+        let parts = split_fields(body)
+        let p = 0
+        while p < len(parts) {
+          let field = s.trim(parts[p])
+          if len(field) == 0 {
+            return error_doc(line_no, "empty field in inline table")
+          }
+          let feq = s.index_of_byte(field, s.B_EQ)
+          if feq < 0 {
+            return error_doc(line_no, "expected `key = value` in inline table, got " + field)
+          }
+          let fkey = parse_key(field[0:feq])
+          if len(fkey) == 0 {
+            return error_doc(line_no, "expected a bare key in inline table")
+          }
+          if has(fields, fkey) {
+            return error_doc(line_no, "duplicate key " + fkey + " in inline table")
+          }
+          let fval = unquote(field[feq + 1:len(field)])
+          if not unquote_ok(fval) {
+            return error_doc(line_no, "expected a quoted string for " + fkey)
+          }
+          fields[fkey] = unquote_value(fval)
+          p = p + 1
+        }
+      }
+      push(doc.pairs, Pair { table: table, key: key, value: "", fields: fields, is_table: true, line: line_no })
+      continue
+    }
+
+    let val = unquote(raw)
+    if not unquote_ok(val) {
+      return error_doc(line_no, "expected a quoted string for " + key)
+    }
+    let empty: Dict[Str, Str] = {}
+    push(doc.pairs, Pair { table: table, key: key, value: unquote_value(val), fields: empty, is_table: false, line: line_no })
+  }
+  doc
+}
+
+# quote renders a string as a TOML basic string. Since the reader interprets no
+# escapes, a value containing a quote or a backslash cannot be represented, and
+# saying so here is better than writing a file that will not read back.
+fn quote(v: Str) -> Str {
+  "\"" + v + "\""
+}
+
+fn quotable(v: Str) -> Bool {
+  s.index_of_byte(v, s.B_QUOTE) < 0 and not s.contains(v, "\\")
+}

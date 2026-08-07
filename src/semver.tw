@@ -1,0 +1,156 @@
+mode systems
+
+# Semantic versions and the two constraint forms spool understands.
+#
+# Pre-release and build metadata are deliberately absent. Pre-release ordering
+# is where most semver implementations grow their bugs, and a package manager
+# for a language with a handful of packages does not earn that complexity. The
+# cost is real: a package cannot publish "1.0.0-rc1" and have spool sort it
+# before "1.0.0". Such a tag is rejected rather than silently mis-ordered.
+
+import "strutil.tw" as s
+
+struct Version {
+  major: I64,
+  minor: I64,
+  patch: I64,
+  # ok is false when parsing failed. The subset has no Opt or Res, so a
+  # sentinel field is the only way to report failure without aborting; see
+  # docs/needs.md.
+  ok: Bool,
+}
+
+struct Constraint {
+  # kind is 0 for exact, 1 for caret, 2 for any.
+  kind: I64,
+  base: Version,
+  text: Str,
+  ok: Bool,
+}
+
+let CONSTRAINT_EXACT = 0
+let CONSTRAINT_CARET = 1
+let CONSTRAINT_ANY = 2
+
+fn bad_version() -> Version {
+  Version { major: 0, minor: 0, patch: 0, ok: false }
+}
+
+# parse reads "1.2.3", tolerating a leading "v" so a git tag can be handed in
+# unchanged. Leading zeroes are accepted and normalised away, which means
+# "1.02.0" and "1.2.0" are the same version; refusing them would be defensible
+# but would reject tags that already exist in the wild.
+fn parse(raw: Str) -> Version {
+  let text = s.trim_prefix(s.trim(raw), "v")
+  let parts = s.split_byte(text, s.B_DOT)
+  if len(parts) != 3 {
+    return bad_version()
+  }
+  let major = s.parse_i64(parts[0])
+  let minor = s.parse_i64(parts[1])
+  let patch = s.parse_i64(parts[2])
+  if major < 0 or minor < 0 or patch < 0 {
+    return bad_version()
+  }
+  Version { major: major, minor: minor, patch: patch, ok: true }
+}
+
+fn to_str(v: Version) -> Str {
+  s.i64_to_str(v.major) + "." + s.i64_to_str(v.minor) + "." + s.i64_to_str(v.patch)
+}
+
+fn compare(a: Version, b: Version) -> I64 {
+  if a.major != b.major {
+    if a.major < b.major {
+      return -1
+    }
+    return 1
+  }
+  if a.minor != b.minor {
+    if a.minor < b.minor {
+      return -1
+    }
+    return 1
+  }
+  if a.patch != b.patch {
+    if a.patch < b.patch {
+      return -1
+    }
+    return 1
+  }
+  0
+}
+
+fn bad_constraint(text: Str) -> Constraint {
+  Constraint { kind: CONSTRAINT_EXACT, base: bad_version(), text: text, ok: false }
+}
+
+# parse_constraint reads "1.2.3" (exact), "^1.2.3" (compatible) or "*" (any).
+# Ranges, "~" and comparison operators are not supported. An unrecognised
+# spelling is an error rather than a silent "any": quietly widening a constraint
+# the author wrote narrowly is the worse failure, because it shows up as a
+# surprise upgrade rather than as a message.
+fn parse_constraint(raw: Str) -> Constraint {
+  let text = s.trim(raw)
+  if text == "*" {
+    return Constraint { kind: CONSTRAINT_ANY, base: bad_version(), text: "*", ok: true }
+  }
+  if s.starts_with(text, "^") {
+    let base = parse(s.trim_prefix(text, "^"))
+    if not base.ok {
+      return bad_constraint(text)
+    }
+    return Constraint { kind: CONSTRAINT_CARET, base: base, text: "^" + to_str(base), ok: true }
+  }
+  let base = parse(text)
+  if not base.ok {
+    return bad_constraint(text)
+  }
+  Constraint { kind: CONSTRAINT_EXACT, base: base, text: to_str(base), ok: true }
+}
+
+fn matches(c: Constraint, v: Version) -> Bool {
+  if c.kind == CONSTRAINT_ANY {
+    return true
+  }
+  if c.kind == CONSTRAINT_EXACT {
+    return compare(v, c.base) == 0
+  }
+  if compare(v, c.base) < 0 {
+    return false
+  }
+  # Below 1.0.0 the leftmost non-zero component carries the breaking changes,
+  # so ^0.2.1 admits 0.2.x but not 0.3.0, and ^0.0.3 admits only 0.0.x.
+  if c.base.major > 0 {
+    return v.major == c.base.major
+  }
+  if c.base.minor > 0 {
+    return v.major == 0 and v.minor == c.base.minor
+  }
+  v.major == 0 and v.minor == 0
+}
+
+# highest_matching returns the index into `versions` of the greatest version
+# satisfying every constraint in `cs`, or -1 when none does.
+fn highest_matching(versions: Arr[Version], cs: Arr[Constraint]) -> I64 {
+  let best = -1
+  let i = 0
+  while i < len(versions) {
+    let v = versions[i]
+    let ok = true
+    let j = 0
+    while j < len(cs) {
+      if not matches(cs[j], v) {
+        ok = false
+      }
+      j = j + 1
+    }
+    if ok {
+      if best < 0 or compare(v, versions[best]) > 0 {
+        best = i
+      }
+    }
+    i = i + 1
+  }
+  best
+}

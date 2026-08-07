@@ -1,0 +1,320 @@
+mode systems
+
+# Fetching packages and writing them where twill's `import` can find them.
+#
+# This is the only file in spool that reaches outside the process. Everything it
+# needs beyond the systems subset is listed in docs/needs.md; nothing here is
+# expressible in twill today, and it is written out in full anyway so that the
+# shape of what the language has to provide is concrete rather than hypothetical.
+
+import "strutil.tw" as s
+import "semver.tw" as semver
+import "manifest.tw" as manifest
+import "lockfile.tw" as lockfile
+import "pkghash.tw" as pkghash
+import "resolve.tw" as resolve
+
+# VENDOR_DIR is where packages are written, relative to the project root.
+#
+# A directory inside the project, not a shared global store. twill resolves a
+# relative import against the importing file first and the working directory
+# second, so the only place a package can sit and still be reachable by a plain
+# `import "..."` is inside the project. The cost is a copy per project and a
+# directory that must be gitignored, and that cost is imposed by the language's
+# import rule, not chosen here.
+let VENDOR_DIR = "twill_modules"
+
+# CACHE_DIR holds bare clones, also inside the project, so that deleting the
+# project deletes everything spool created. A shared cache would save
+# re-cloning across projects and would introduce a second place where a
+# poisoned copy could hide; for v0.1 that trade is not worth it.
+let CACHE_DIR = ".spool/cache"
+
+struct Fetched {
+  paths: Arr[Str],
+  contents: Arr[Str],
+  hash: Str,
+  err: Str,
+}
+
+fn join_path(a: Str, b: Str) -> Str {
+  if len(a) == 0 {
+    return b
+  }
+  if s.ends_with(a, "/") {
+    return a + b
+  }
+  a + "/" + b
+}
+
+# cache_path names a cache directory after the repository URL. The readable
+# prefix keeps the cache browsable when something goes wrong; the digest suffix
+# is what keeps two repositories that share a last path segment apart.
+fn cache_path(root: Str, url: Str) -> Str {
+  let base = url
+  let cut = s.last_index_of_byte(base, s.B_SLASH)
+  let colon = s.last_index_of_byte(base, s.B_COLON)
+  if colon > cut {
+    cut = colon
+  }
+  if cut >= 0 {
+    base = base[cut + 1:len(base)]
+  }
+  base = s.trim_suffix(base, ".git")
+  let safe = ""
+  let i = 0
+  while i < len(base) {
+    let b = base[i]
+    if s.is_lower(b) or s.is_upper(b) or s.is_digit(b) or b == s.B_MINUS or b == s.B_UNDER {
+      safe = safe + base[i:i + 1]
+    }
+    i = i + 1
+  }
+  join_path(join_path(root, CACHE_DIR), safe + "-" + short_hash(url))
+}
+
+fn short_hash(v: Str) -> Str {
+  let h = s.trim_prefix(pkghash.hash_tree(["url"], [v]), pkghash.HASH_PREFIX)
+  h[0:16]
+}
+
+# git runs the git binary and returns its standard output, prefixed with a
+# status byte: "!" and a message on failure, " " and the output on success.
+#
+# Shelling out to git rather than speaking the protocol is what borrows the
+# user's existing credentials, proxies and host keys, and it is the whole reason
+# a package manager can avoid a network dependency. The cost is a hard
+# requirement on git being on PATH, which spool reports plainly rather than
+# failing obscurely.
+fn git(dir: Str, argv: Arr[Str]) -> Str {
+  run("git", argv, dir)
+}
+
+fn git_ok(r: Str) -> Bool {
+  r[0] == s.B_SPACE
+}
+
+fn git_out(r: Str) -> Str {
+  r[1:len(r)]
+}
+
+# ensure_clone clones a repository into the cache or updates an existing clone.
+fn ensure_clone(root: Str, url: Str) -> Str {
+  let dir = cache_path(root, url)
+  if path_exists(join_path(dir, "HEAD")) {
+    # --prune-tags so a tag deleted or moved upstream is not resurrected from
+    # the local cache. Without it a stale machine resolves to a version that no
+    # longer exists anywhere, which is the hardest kind of build to explain.
+    let r = git(dir, ["fetch", "--tags", "--prune", "--prune-tags", "--quiet", "origin"])
+    if not git_ok(r) {
+      return "!updating " + url + ": " + git_out(r)
+    }
+    return " " + dir
+  }
+  mkdir_all(join_path(root, CACHE_DIR))
+  let r = git("", ["clone", "--bare", "--quiet", url, dir])
+  if not git_ok(r) {
+    return "!cloning " + url + ": " + git_out(r)
+  }
+  " " + dir
+}
+
+# published_versions lists a repository's version tags. A tag that is not a
+# plain major.minor.patch is skipped rather than reported: repositories carry
+# all kinds of tags, and refusing to resolve because someone tagged "nightly"
+# would be obstructive.
+fn published_versions(root: Str, url: Str) -> Arr[Str] {
+  let out: Arr[Str] = []
+  let c = ensure_clone(root, url)
+  if not git_ok(c) {
+    return out
+  }
+  let r = git(git_out(c), ["tag", "--list"])
+  if not git_ok(r) {
+    return out
+  }
+  let lines = s.split_lines(git_out(r))
+  let i = 0
+  while i < len(lines) {
+    let tag = s.trim(lines[i])
+    let v = semver.parse(tag)
+    if v.ok {
+      push(out, semver.to_str(v))
+    }
+    i = i + 1
+  }
+  out
+}
+
+# tag_for finds the spelling, "1.2.3" or "v1.2.3", that the repository actually
+# uses. Both are common in the wild and guessing wrong produces a confusing
+# "no such tag" for a tag the user can see in their own repository.
+fn tag_for(dir: Str, version: Str) -> Str {
+  let candidates = ["v" + version, version]
+  let i = 0
+  while i < len(candidates) {
+    let r = git(dir, ["rev-parse", "--verify", "--quiet", candidates[i] + "^{commit}"])
+    if git_ok(r) {
+      return candidates[i]
+    }
+    i = i + 1
+  }
+  ""
+}
+
+# commit_for resolves a version to the exact commit its tag points at. That is
+# what the lockfile records, so a later install cannot follow a tag that has
+# since been moved to different code.
+fn commit_for(root: Str, url: Str, version: Str) -> Str {
+  let c = ensure_clone(root, url)
+  if not git_ok(c) {
+    return "!" + git_out(c)
+  }
+  let dir = git_out(c)
+  let tag = tag_for(dir, version)
+  if len(tag) == 0 {
+    return "!" + url + " has no tag " + version + " or v" + version
+  }
+  let r = git(dir, ["rev-list", "-n", "1", tag])
+  if not git_ok(r) {
+    return "!" + git_out(r)
+  }
+  " " + s.trim(git_out(r))
+}
+
+# read_manifest_at reads a package's own spool.toml at a version without
+# checking the repository out.
+fn read_manifest_at(root: Str, url: Str, version: Str) -> Str {
+  let c = ensure_clone(root, url)
+  if not git_ok(c) {
+    return "!" + git_out(c)
+  }
+  let dir = git_out(c)
+  let tag = tag_for(dir, version)
+  if len(tag) == 0 {
+    return "!" + url + " has no tag " + version + " or v" + version
+  }
+  let r = git(dir, ["show", tag + ":" + manifest.MANIFEST_NAME])
+  if not git_ok(r) {
+    return "!" + url + " has no " + manifest.MANIFEST_NAME + " at " + tag
+  }
+  r
+}
+
+# build_catalog fills a resolver Catalog from git. This is where the network
+# lives; resolve.tw itself never calls anything in this file.
+#
+# It walks the dependency graph breadth first, fetching only the repositories it
+# reaches. The resolver may then choose a version whose dependencies were not
+# fetched, which is why it is called in a loop by install below rather than once.
+fn build_catalog(root: Str, m: manifest.Manifest, cat: resolve.Catalog) -> Str {
+  let pending: Arr[Str] = []
+  let i = 0
+  while i < len(m.deps) {
+    push(pending, m.deps[i].git)
+    i = i + 1
+  }
+  let at = 0
+  while at < len(pending) {
+    let url = pending[at]
+    at = at + 1
+    if has(cat.versions, url) {
+      continue
+    }
+    let versions = published_versions(root, url)
+    cat.versions[url] = s.join(versions, ",")
+    let v = 0
+    while v < len(versions) {
+      let src = read_manifest_at(root, url, versions[v])
+      v = v + 1
+      if not git_ok(src) {
+        continue
+      }
+      let sub = manifest.parse(git_out(src))
+      if len(sub.err) > 0 {
+        continue
+      }
+      cat.deps[resolve.catalog_key(url, versions[v - 1])] = git_out(src)
+      let d = 0
+      while d < len(sub.deps) {
+        push(pending, sub.deps[d].git)
+        d = d + 1
+      }
+    }
+  }
+  ""
+}
+
+# export writes the tree at a commit into dst. It goes through `git archive`
+# rather than a checkout, so nothing from the repository's working state or its
+# .git directory can end up in the vendored copy.
+fn export(root: Str, url: Str, commit: Str, dst: Str) -> Str {
+  let c = ensure_clone(root, url)
+  if not git_ok(c) {
+    return git_out(c)
+  }
+  remove_all(dst)
+  mkdir_all(dst)
+  let r = git(git_out(c), ["--work-tree=" + dst, "checkout", "--force", commit, "--", "."])
+  if not git_ok(r) {
+    return "exporting " + commit + ": " + git_out(r)
+  }
+  ""
+}
+
+# read_tree reads every file under dir, sorted, and hashes them. The sort is by
+# byte on a `/`-separated path, so the hash does not depend on the order the
+# filesystem happened to hand back or on the host's path separator.
+fn read_tree(dir: Str) -> Fetched {
+  let found = list_dir_recursive(dir)
+  let kept: Arr[Str] = []
+  let i = 0
+  while i < len(found) {
+    if not pkghash.is_excluded(found[i]) {
+      push(kept, found[i])
+    }
+    i = i + 1
+  }
+  let paths = s.sort_strs(kept)
+  let contents: Arr[Str] = []
+  let j = 0
+  while j < len(paths) {
+    let body = read_file(join_path(dir, paths[j]))
+    push(contents, body)
+    j = j + 1
+  }
+  Fetched { paths: paths, contents: contents, hash: pkghash.hash_tree(paths, contents), err: "" }
+}
+
+# list_dir_recursive returns every regular file under dir as a `/`-separated
+# path relative to dir. Symlinks are not followed: a vendored twill package is
+# source files, and following one would let a package's hash cover, or fail to
+# cover, something outside the tree.
+fn list_dir_recursive(dir: Str) -> Arr[Str] {
+  let out: Arr[Str] = []
+  walk(dir, "", out)
+  out
+}
+
+fn walk(base: Str, prefix: Str, out: Arr[Str]) {
+  let entries = list_dir(join_path(base, prefix))
+  let i = 0
+  while i < len(entries) {
+    let name = entries[i]
+    i = i + 1
+    if name == "." or name == ".." {
+      continue
+    }
+    let rel = prefix
+    if len(rel) == 0 {
+      rel = name
+    } else {
+      rel = rel + "/" + name
+    }
+    if is_dir(join_path(base, rel)) {
+      walk(base, rel, out)
+    } else {
+      push(out, rel)
+    }
+  }
+}

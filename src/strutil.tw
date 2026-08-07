@@ -1,0 +1,320 @@
+mode systems
+
+# Byte and string helpers.
+#
+# twill's systems subset gives a Str byte indexing, slicing and a length, and
+# nothing else. Everything spool needs to read a manifest is built from those
+# three operations here, so the rest of the source never indexes a byte
+# directly. See docs/needs.md: this file is the one that would shrink most if
+# the language grew a small string library.
+
+# Byte constants. There is no character literal in the subset, so each one is
+# read out of a one-byte string. Naming them is not decoration: `b == 34` in the
+# middle of a parser is unreadable and a wrong constant is a silent bug.
+let B_TAB = "\t"[0]
+let B_LF = "\n"[0]
+let B_CR = "\r"[0]
+let B_SPACE = " "[0]
+let B_HASH = "#"[0]
+let B_QUOTE = "\""[0]
+let B_APOS = "'"[0]
+let B_EQ = "="[0]
+let B_LBRACKET = "["[0]
+let B_RBRACKET = "]"[0]
+let B_LBRACE = "{"[0]
+let B_RBRACE = "}"[0]
+let B_COMMA = ","[0]
+let B_DOT = "."[0]
+let B_SLASH = "/"[0]
+let B_COLON = ":"[0]
+let B_MINUS = "-"[0]
+let B_UNDER = "_"[0]
+let B_CARET = "^"[0]
+let B_STAR = "*"[0]
+let B_ZERO = "0"[0]
+let B_NINE = "9"[0]
+let B_LOWER_A = "a"[0]
+let B_LOWER_Z = "z"[0]
+let B_UPPER_A = "A"[0]
+let B_UPPER_Z = "Z"[0]
+
+# HEX is indexed by nibble to build a hex string. A subset with no way to turn
+# a byte value back into a one-byte string makes a table the only route; see
+# docs/needs.md.
+let HEX = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f"]
+
+fn is_digit(b: I64) -> Bool {
+  b >= B_ZERO and b <= B_NINE
+}
+
+fn is_lower(b: I64) -> Bool {
+  b >= B_LOWER_A and b <= B_LOWER_Z
+}
+
+fn is_upper(b: I64) -> Bool {
+  b >= B_UPPER_A and b <= B_UPPER_Z
+}
+
+fn is_space(b: I64) -> Bool {
+  b == B_SPACE or b == B_TAB or b == B_CR or b == B_LF
+}
+
+fn is_empty(s: Str) -> Bool {
+  len(s) == 0
+}
+
+# index_of returns the first offset of `needle` in `hay`, or -1. The naive scan
+# is quadratic in the worst case and that is fine: it runs over manifest lines,
+# never over a package's source.
+fn index_of(hay: Str, needle: Str) -> I64 {
+  let n = len(needle)
+  let h = len(hay)
+  if n == 0 {
+    return 0
+  }
+  if n > h {
+    return -1
+  }
+  let i = 0
+  while i <= h - n {
+    let j = 0
+    let match = true
+    while j < n {
+      if hay[i + j] != needle[j] {
+        match = false
+        j = n
+      } else {
+        j = j + 1
+      }
+    }
+    if match {
+      return i
+    }
+    i = i + 1
+  }
+  -1
+}
+
+fn index_of_byte(hay: Str, b: I64) -> I64 {
+  let i = 0
+  while i < len(hay) {
+    if hay[i] == b {
+      return i
+    }
+    i = i + 1
+  }
+  -1
+}
+
+fn last_index_of_byte(hay: Str, b: I64) -> I64 {
+  let i = len(hay) - 1
+  while i >= 0 {
+    if hay[i] == b {
+      return i
+    }
+    i = i - 1
+  }
+  -1
+}
+
+fn contains(hay: Str, needle: Str) -> Bool {
+  index_of(hay, needle) >= 0
+}
+
+fn starts_with(s: Str, prefix: Str) -> Bool {
+  if len(prefix) > len(s) {
+    return false
+  }
+  s[0:len(prefix)] == prefix
+}
+
+fn ends_with(s: Str, suffix: Str) -> Bool {
+  if len(suffix) > len(s) {
+    return false
+  }
+  s[len(s) - len(suffix):len(s)] == suffix
+}
+
+fn trim_prefix(s: Str, prefix: Str) -> Str {
+  if starts_with(s, prefix) {
+    return s[len(prefix):len(s)]
+  }
+  s
+}
+
+fn trim_suffix(s: Str, suffix: Str) -> Str {
+  if ends_with(s, suffix) {
+    return s[0:len(s) - len(suffix)]
+  }
+  s
+}
+
+fn trim(s: Str) -> Str {
+  let a = 0
+  let b = len(s)
+  while a < b and is_space(s[a]) {
+    a = a + 1
+  }
+  while b > a and is_space(s[b - 1]) {
+    b = b - 1
+  }
+  s[a:b]
+}
+
+# split_byte splits on every occurrence, keeping empty fields. Keeping them
+# matters: a manifest line of "a = " must parse as an empty value and be
+# rejected, not silently read as a one-field line.
+fn split_byte(s: Str, sep: I64) -> Arr[Str] {
+  let out: Arr[Str] = []
+  let start = 0
+  let i = 0
+  while i < len(s) {
+    if s[i] == sep {
+      push(out, s[start:i])
+      start = i + 1
+    }
+    i = i + 1
+  }
+  push(out, s[start:len(s)])
+  out
+}
+
+# split_lines normalises CRLF, so a manifest written on Windows and one written
+# on Linux parse to the same thing and hash the same.
+fn split_lines(s: Str) -> Arr[Str] {
+  let raw = split_byte(s, B_LF)
+  let out: Arr[Str] = []
+  let i = 0
+  while i < len(raw) {
+    push(out, trim_suffix(raw[i], "\r"))
+    i = i + 1
+  }
+  out
+}
+
+fn join(parts: Arr[Str], sep: Str) -> Str {
+  let out = ""
+  let i = 0
+  while i < len(parts) {
+    if i > 0 {
+      out = out + sep
+    }
+    out = out + parts[i]
+    i = i + 1
+  }
+  out
+}
+
+fn repeat(s: Str, n: I64) -> Str {
+  let out = ""
+  let i = 0
+  while i < n {
+    out = out + s
+    i = i + 1
+  }
+  out
+}
+
+# pad_right is only for aligning `spool list` output.
+fn pad_right(s: Str, width: I64) -> Str {
+  if len(s) >= width {
+    return s
+  }
+  s + repeat(" ", width - len(s))
+}
+
+# parse_i64 reads an unsigned decimal number. It returns -1 for anything else,
+# including the empty string and a leading sign, because every number spool
+# parses is a version component and a negative one is meaningless.
+fn parse_i64(s: Str) -> I64 {
+  if len(s) == 0 {
+    return -1
+  }
+  let n = 0
+  let i = 0
+  while i < len(s) {
+    if not is_digit(s[i]) {
+      return -1
+    }
+    n = n * 10 + (s[i] - B_ZERO)
+    i = i + 1
+  }
+  n
+}
+
+fn i64_to_str(n: I64) -> Str {
+  if n == 0 {
+    return "0"
+  }
+  let neg = n < 0
+  let v = n
+  if neg {
+    v = 0 - n
+  }
+  let out = ""
+  while v > 0 {
+    out = HEX[v - (v / 10) * 10] + out
+    v = v / 10
+  }
+  if neg {
+    return "-" + out
+  }
+  out
+}
+
+fn hex_byte(b: I64) -> Str {
+  HEX[(b / 16) and 15] + HEX[b and 15]
+}
+
+# compare_str orders two strings by byte, returning -1, 0 or 1. Every sort in
+# spool goes through this, so that ordering never depends on a locale or on the
+# host's idea of collation. A lockfile sorted differently on two machines is the
+# one failure this tool exists to prevent.
+fn compare_str(a: Str, b: Str) -> I64 {
+  let n = len(a)
+  if len(b) < n {
+    n = len(b)
+  }
+  let i = 0
+  while i < n {
+    if a[i] < b[i] {
+      return -1
+    }
+    if a[i] > b[i] {
+      return 1
+    }
+    i = i + 1
+  }
+  if len(a) < len(b) {
+    return -1
+  }
+  if len(a) > len(b) {
+    return 1
+  }
+  0
+}
+
+# sort_strs is an insertion sort. The inputs are dependency lists, tens of
+# entries at most, so the quadratic cost is invisible and the implementation is
+# short enough to be obviously correct. That trade would be wrong at any scale
+# spool is likely to reach.
+fn sort_strs(xs: Arr[Str]) -> Arr[Str] {
+  let out: Arr[Str] = []
+  let i = 0
+  while i < len(xs) {
+    push(out, xs[i])
+    i = i + 1
+  }
+  let j = 1
+  while j < len(out) {
+    let cur = out[j]
+    let k = j - 1
+    while k >= 0 and compare_str(out[k], cur) > 0 {
+      out[k + 1] = out[k]
+      k = k - 1
+    }
+    out[k + 1] = cur
+    j = j + 1
+  }
+  out
+}

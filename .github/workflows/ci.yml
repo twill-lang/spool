@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# spool cannot be built or run yet: it is written in twill's systems subset,
+# which is still being implemented. So CI checks the things that are checkable
+# today and says plainly that it is not checking behaviour. When `mode systems`
+# lands, the gate becomes `twill run tests/*.tw` and these checks stay.
+jobs:
+  source-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Every source file is twill
+        run: |
+          stray=$(find . -path ./.git -prune -o -type f \
+            ! -name '*.tw' ! -name '*.md' ! -name '*.yml' ! -name 'LICENSE' \
+            ! -name '.gitignore' -print)
+          if [ -n "$stray" ]; then
+            echo "spool is written in twill; these files are neither .tw nor documentation:"
+            echo "$stray"
+            exit 1
+          fi
+
+      - name: No reference to the old language name
+        run: |
+          # twill was called raster. The name should not appear anywhere,
+          # including in prose.
+          if grep -rni 'raster' --include='*.tw' --include='*.md' --include='*.yml' .; then
+            echo "found a reference to the old language name; it is twill"
+            exit 1
+          fi
+
+      - name: No file carries the old source extension
+        run: |
+          # The string ".ra" is allowed in the source: spool rejects an entry
+          # that uses the old extension and the error names it. A file actually
+          # carrying it is not allowed.
+          if find . -name '*.ra' | grep .; then
+            echo "twill source is .tw"
+            exit 1
+          fi
+
+      - name: No em dashes
+        run: |
+          # The character is built with printf rather than written literally,
+          # so that this check does not fail on its own source.
+          dash=$(printf '\xe2\x80\x94')
+          if grep -rn "$dash" --include='*.tw' --include='*.md' --include='*.yml' .; then
+            echo "em dashes are not used in this repository"
+            exit 1
+          fi
+
+      - name: Every twill source declares its mode
+        run: |
+          for f in $(find . -name '*.tw'); do
+            if [ "$(head -n 1 "$f")" != "mode systems" ]; then
+              echo "$f does not start with 'mode systems'"
+              exit 1
+            fi
+          done
+
+      - name: The README does not claim spool works
+        run: |
+          grep -q 'spool does not run yet' README.md || {
+            echo "README.md must state that spool does not run yet"
+            exit 1
+          }

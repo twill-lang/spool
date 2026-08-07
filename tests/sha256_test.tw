@@ -1,0 +1,120 @@
+mode systems
+
+# SHA-256 against the published test vectors.
+#
+# These are the reason src/sha256.tw can be trusted at all. A hash function that
+# is only tested against itself is a checksum with delusions.
+
+import "harness.tw" as t
+import "../src/strutil.tw" as s
+import "../src/sha256.tw" as sha
+import "../src/pkghash.tw" as pkghash
+
+fn the_empty_string_hashes_to_the_published_vector() {
+  t.equal_str("sha256 of the empty string",
+    sha.hash_str(""),
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+}
+
+fn abc_hashes_to_the_published_vector() {
+  t.equal_str("sha256 of abc",
+    sha.hash_str("abc"),
+    "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+}
+
+fn a_message_spanning_two_blocks_hashes_to_the_published_vector() {
+  t.equal_str("sha256 of the 56-byte two-block vector",
+    sha.hash_str("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
+    "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1")
+}
+
+fn a_million_a_characters_is_not_tested_here_but_the_boundary_lengths_are() {
+  # The 1,000,000-character vector is skipped deliberately: at the speed this
+  # implementation runs in an interpreter it would dominate the suite. The
+  # lengths that actually exercise the padding logic are 55, 56 and 64 bytes,
+  # which straddle the point where padding spills into an extra block.
+  t.equal_i64("55 bytes pads into one block", sha.padded_len(55), 64)
+  t.equal_i64("56 bytes pads into two blocks", sha.padded_len(56), 128)
+  t.equal_i64("64 bytes pads into two blocks", sha.padded_len(64), 128)
+  t.equal_i64("0 bytes pads into one block", sha.padded_len(0), 64)
+
+  t.equal_str("sha256 of 55 a characters",
+    sha.hash_str(s.repeat("a", 55)),
+    "9f4390f8d30c2dd92ec9f095b65e2b9ae9b0a925a5258e241c9f1e910f734318")
+  t.equal_str("sha256 of 56 a characters",
+    sha.hash_str(s.repeat("a", 56)),
+    "b35439a4ac6f0948b6d6f9e3c6af0f5f590ce20f1bde7090ef7970686ec6738a")
+  t.equal_str("sha256 of 64 a characters",
+    sha.hash_str(s.repeat("a", 64)),
+    "ffe054fe7ae0cb6dc65c3af9b61d5209f439851db43d0ba5997337df154668eb")
+}
+
+fn every_digest_is_sixty_four_lowercase_hex_characters() {
+  let d = sha.hash_str("anything")
+  t.equal_i64("a digest is 64 characters", len(d), 64)
+  let i = 0
+  let ok = true
+  while i < len(d) {
+    let b = d[i]
+    if not (s.is_digit(b) or (b >= s.B_LOWER_A and b <= "f"[0])) {
+      ok = false
+    }
+    i = i + 1
+  }
+  t.check("a digest is lowercase hex", ok)
+}
+
+fn the_tree_hash_is_prefixed_with_its_algorithm() {
+  let h = pkghash.hash_tree(["a.tw"], ["x"])
+  t.check("a tree hash carries its algorithm", s.starts_with(h, pkghash.HASH_PREFIX))
+  t.check("a tree hash is recognised", pkghash.is_hash(h))
+  t.check("an md5 digest is not recognised", not pkghash.is_hash("md5:abc"))
+}
+
+fn two_identical_trees_hash_the_same_and_a_changed_file_does_not() {
+  t.equal_str("identical trees hash the same",
+    pkghash.hash_tree(["a.tw", "sub/b.tw"], ["one", "two"]),
+    pkghash.hash_tree(["a.tw", "sub/b.tw"], ["one", "two"]))
+  t.check("a content change changes the hash",
+    pkghash.hash_tree(["a.tw"], ["one"]) != pkghash.hash_tree(["a.tw"], ["two"]))
+  t.check("a rename changes the hash",
+    pkghash.hash_tree(["a.tw"], ["same"]) != pkghash.hash_tree(["b.tw"], ["same"]))
+  t.check("an added empty file changes the hash",
+    pkghash.hash_tree(["a.tw"], ["one"]) != pkghash.hash_tree(["a.tw", "b.tw"], ["one", ""]))
+}
+
+fn a_path_byte_cannot_be_shuffled_into_a_file_body() {
+  # Without length prefixes these two trees serialise to the same bytes, and one
+  # package could be substituted for another under an unchanged hash.
+  t.check("path and content cannot be shuffled into the same hash",
+    pkghash.hash_tree(["ab"], ["c"]) != pkghash.hash_tree(["a"], ["bc"]))
+}
+
+fn git_metadata_is_excluded_so_the_fetch_method_does_not_change_the_hash() {
+  t.check(".git is excluded", pkghash.is_excluded(".git/config"))
+  t.check("a nested .git is excluded", pkghash.is_excluded("sub/.git/objects/ab"))
+  t.check("a normal source file is not excluded", not pkghash.is_excluded("src/main.tw"))
+  t.check("a dotfile that is not VCS metadata is kept", not pkghash.is_excluded(".gitignore"))
+}
+
+fn verify_accepts_a_match_and_explains_a_mismatch() {
+  let h = pkghash.hash_tree(["a.tw"], ["trusted"])
+  t.equal_str("verify accepts a matching hash", pkghash.verify("p", h, h), "")
+  let other = pkghash.hash_tree(["a.tw"], ["tampered"])
+  let msg = pkghash.verify("p", other, h)
+  t.check("verify rejects a mismatch", len(msg) > 0)
+  t.check("the mismatch shows the locked digest", s.contains(msg, h))
+  t.check("the mismatch shows the fetched digest", s.contains(msg, other))
+}
+
+the_empty_string_hashes_to_the_published_vector()
+abc_hashes_to_the_published_vector()
+a_message_spanning_two_blocks_hashes_to_the_published_vector()
+a_million_a_characters_is_not_tested_here_but_the_boundary_lengths_are()
+every_digest_is_sixty_four_lowercase_hex_characters()
+the_tree_hash_is_prefixed_with_its_algorithm()
+two_identical_trees_hash_the_same_and_a_changed_file_does_not()
+a_path_byte_cannot_be_shuffled_into_a_file_body()
+git_metadata_is_excluded_so_the_fetch_method_does_not_change_the_hash()
+verify_accepts_a_match_and_explains_a_mismatch()
+t.report("sha256")
