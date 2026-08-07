@@ -29,9 +29,11 @@ jobs:
 
       - name: No reference to the old language name
         run: |
-          # twill was called raster. The name should not appear anywhere,
-          # including in prose.
-          if grep -rni 'raster' --include='*.tw' --include='*.md' --include='*.yml' .; then
+          # twill had an earlier name. It should not appear anywhere, including
+          # in prose. The pattern is assembled from parts so that this step does
+          # not match its own source, the same trick the em dash check uses.
+          old="ra""ster"
+          if grep -rni "$old" --include='*.tw' --include='*.md' --include='*.yml' .; then
             echo "found a reference to the old language name; it is twill"
             exit 1
           fi
