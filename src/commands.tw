@@ -9,6 +9,7 @@ import "lockfile.tw" as lockfile
 import "pkghash.tw" as pkghash
 import "resolve.tw" as resolve
 import "vendor.tw" as vendor
+import "ui.tw" as ui
 
 struct Project {
   root: Str,
@@ -102,7 +103,7 @@ fn cmd_install(dir: Str, update: Bool) -> Str {
     if len(why) == 0 {
       reuse = true
     } else {
-      print("re-resolving: " + why)
+      print(ui.reresolving(why))
     }
   }
 
@@ -147,7 +148,7 @@ fn cmd_install(dir: Str, update: Bool) -> Str {
     return vendor_err
   }
   write_file(vendor.join_path(p.root, lockfile.LOCK_NAME), lockfile.render(l))
-  print("packages are in " + vendor.VENDOR_DIR + "/")
+  print(ui.vendored(vendor.VENDOR_DIR))
   ""
 }
 
@@ -164,12 +165,12 @@ fn materialise(root: Str, l: lockfile.Lock) -> Str {
     if pkghash.is_hash(e.hash) and path_exists(dst) {
       let on_disk = vendor.read_tree(dst)
       if on_disk.hash == e.hash {
-        print("up to date " + e.name + " " + e.version)
+        print(ui.up_to_date(e.name, e.version))
         continue
       }
     }
 
-    print("fetching " + e.name + " " + e.version + " (" + short_commit(e.commit) + ")")
+    print(ui.fetching(e.name, e.version, short_commit(e.commit)))
     let export_err = vendor.export(root, e.git, e.commit, dst)
     if len(export_err) > 0 {
       return export_err
@@ -210,7 +211,7 @@ fn prune(vendor_root: Str, l: lockfile.Lock) {
     if lockfile.find(l, name) >= 0 {
       continue
     }
-    print("removing " + name)
+    print(ui.removing(name))
     remove_all(vendor.join_path(vendor_root, name))
   }
 }
@@ -269,7 +270,7 @@ fn cmd_add(dir: Str, name: Str, url: Str, requested: Str) -> Str {
   let path = vendor.join_path(p.root, manifest.MANIFEST_NAME)
   let d = manifest.Dep { name: name, version: constraint, git: url }
   write_file(path, manifest.add_dep(read_file(path), d))
-  print("added " + name + " " + constraint)
+  print(ui.added(name, constraint))
   cmd_install(dir, false)
 }
 
@@ -284,7 +285,7 @@ fn cmd_remove(dir: Str, name: Str) -> Str {
     return name + " is not a declared dependency"
   }
   write_file(path, out[1:len(out)])
-  print("removed " + name)
+  print(ui.removed(name))
   # A full re-resolve, not a reinstall. The lockfile does not record which
   # dependency required what, so re-resolving is the only way to learn which
   # transitive packages went away with this one.
@@ -319,7 +320,7 @@ fn cmd_list(dir: Str) -> Str {
     } else {
       let e = l.packages[at]
       print("  " + s.pad_right(e.name, 20) + s.pad_right(e.version, 10) + s.pad_right(d.version, 10)
-        + install_state(p.root, e))
+        + ui.state(install_state(p.root, e)))
     }
   }
 
@@ -336,7 +337,7 @@ fn cmd_list(dir: Str) -> Str {
       shown_header = true
     }
     print("  " + s.pad_right(e.name, 20) + s.pad_right(e.version, 10) + s.pad_right("", 10)
-      + install_state(p.root, e))
+      + ui.state(install_state(p.root, e)))
   }
 
   if len(l.packages) == 0 {

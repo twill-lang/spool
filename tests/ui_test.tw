@@ -1,0 +1,65 @@
+mode systems
+
+import "harness.tw" as t
+import "../src/ui.tw" as ui
+import "../twill_modules/twill/src/term/caps.tw" as cp
+import "../twill_modules/twill/src/cli/theme.tw" as th
+
+# The plain reading the tests pin, and a colour one so ansi.paint actually emits.
+fn plain_caps() -> cp.Caps = cp.Caps {
+  level: cp.LEVEL_PLAIN, tty: false, width: 80, height: 24,
+  hyperlinks: false, unicode: false, animate: false,
+}
+
+fn colour_caps() -> cp.Caps = cp.Caps {
+  level: cp.LEVEL_TRUECOLOR, tty: true, width: 80, height: 24,
+  hyperlinks: false, unicode: true, animate: false,
+}
+
+fn index_of(hay: Str, needle: Str) -> I64 {
+  let n = len(needle)
+  let i = 0
+  while i + n <= len(hay) {
+    if hay[i:i + n] == needle {
+      return i
+    }
+    i = i + 1
+  }
+  -1
+}
+
+fn has_escape(s: Str) -> Bool = index_of(s, chr(27)) >= 0
+
+fn a_verb_is_right_aligned_in_the_gutter() {
+  # "fetching" is eight characters, the gutter is twelve, so four spaces lead it
+  # and the detail follows two spaces after.
+  let line = ui.status(plain_caps(), "fetching", th.heading(), "warp 1.2.0")
+  t.equal_str("the verb sits in a twelve-wide gutter", line, "    fetching  warp 1.2.0")
+}
+
+fn a_plain_terminal_gets_no_escapes() {
+  t.check("status is bare", not has_escape(ui.status(plain_caps(), "added", th.success(), "warp")))
+  t.check("an install cell is bare", not has_escape(ui.install_cell(plain_caps(), "ok")))
+  t.equal_str("and the cell is just its text", ui.install_cell(plain_caps(), "ok"), "ok")
+}
+
+fn a_colour_terminal_lights_them() {
+  t.check("status is lit", has_escape(ui.status(colour_caps(), "added", th.success(), "warp")))
+  t.check("the ok cell is lit", has_escape(ui.install_cell(colour_caps(), "ok")))
+  t.check("a modified cell is lit", has_escape(ui.install_cell(colour_caps(), "modified (run `spool install`)")))
+}
+
+fn the_wrappers_still_carry_their_words() {
+  # These detect capabilities themselves, so the pinned part is the text, which
+  # survives whatever the terminal did to it.
+  t.check("fetching names the package", index_of(ui.fetching("warp", "1.2.0", "abc1234"), "warp") >= 0)
+  t.check("fetching carries the commit", index_of(ui.fetching("warp", "1.2.0", "abc1234"), "abc1234") >= 0)
+  t.check("added carries the constraint", index_of(ui.added("warp", "^1.2.0"), "^1.2.0") >= 0)
+  t.check("up to date names the version", index_of(ui.up_to_date("warp", "1.2.0"), "1.2.0") >= 0)
+}
+
+a_verb_is_right_aligned_in_the_gutter()
+a_plain_terminal_gets_no_escapes()
+a_colour_terminal_lights_them()
+the_wrappers_still_carry_their_words()
+t.report("ui")

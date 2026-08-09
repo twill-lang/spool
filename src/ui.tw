@@ -1,0 +1,97 @@
+mode systems
+
+# ui.tw - the colour on spool's status lines.
+#
+# spool talks to a person one line at a time: a verb and a package. This file
+# is where those lines are dressed, in the cargo shape - the verb painted and
+# right-aligned in a narrow gutter, the package after it. The gutter means the
+# verbs stack into a column the eye reads down, "fetching" under "fetching",
+# rather than a ragged left margin.
+#
+# The palette is twill's, vendored under twill_modules the way every sibling
+# reaches it. The one colour that matters here is the package name, and twill's
+# theme already has a name for it: package_name, the warm that spool lent the
+# ecosystem in the first place. Everything routes through ansi.paint, so a piped
+# install log comes back as the same bare verbs it always was.
+
+import "../twill_modules/twill/src/term/caps.tw" as cp
+import "../twill_modules/twill/src/term/ansi.tw" as ansi
+import "../twill_modules/twill/src/cli/theme.tw" as th
+
+# Wide enough for the longest verb spool prints, "re-resolving".
+let GUTTER: I64 = 12
+
+fn pad_left(s: Str, width: I64) -> Str {
+  let out = s
+  while len(out) < width {
+    out = " " + out
+  }
+  out
+}
+
+# The verb, painted and right-aligned in the gutter, then the detail. Padding is
+# done on the bare verb and the colour laid over the padded result, so the
+# escapes never count toward the width.
+fn status(caps: cp.Caps, verb: Str, style: ansi.Style, detail: Str) -> Str =
+  ansi.paint(caps, style, pad_left(verb, GUTTER)) + "  " + detail
+
+fn name(caps: cp.Caps, n: Str) -> Str = ansi.paint(caps, th.package_name(), n)
+fn dim(caps: cp.Caps, t: Str) -> Str = ansi.paint(caps, th.muted(), t)
+
+# fetching: active work, so the verb is the accent. The name carries its colour,
+# the version and the short commit stay quiet behind it.
+fn fetching(pkg: Str, version: Str, commit: Str) -> Str {
+  let caps = cp.detect()
+  status(caps, "fetching", th.heading(),
+    name(caps, pkg) + " " + dim(caps, version) + " " + dim(caps, "(" + commit + ")"))
+}
+
+# up to date: nothing happened, so the whole line is quiet. A run that changed
+# nothing should read as a run that changed nothing.
+fn up_to_date(pkg: Str, version: Str) -> Str {
+  let caps = cp.detect()
+  status(caps, "up to date", th.muted(), dim(caps, pkg + " " + version))
+}
+
+fn removing(pkg: Str) -> Str {
+  let caps = cp.detect()
+  status(caps, "removing", th.warning(), name(caps, pkg))
+}
+
+fn added(pkg: Str, constraint: Str) -> Str {
+  let caps = cp.detect()
+  status(caps, "added", th.success(), name(caps, pkg) + " " + dim(caps, constraint))
+}
+
+fn removed(pkg: Str) -> Str {
+  let caps = cp.detect()
+  status(caps, "removed", th.warning(), name(caps, pkg))
+}
+
+fn reresolving(why: Str) -> Str {
+  let caps = cp.detect()
+  status(caps, "re-resolving", th.muted(), dim(caps, why))
+}
+
+fn vendored(dir: Str) -> Str {
+  let caps = cp.detect()
+  dim(caps, "packages are in " + dir + "/")
+}
+
+# The state cell in `spool list`: an installed-and-matching tree is mint, a
+# missing one is quiet, and a modified one is the warning colour, because a tree
+# that drifted from its lock is the one thing in that table worth catching.
+fn install_cell(caps: cp.Caps, state: Str) -> Str {
+  if state == "ok" {
+    return ansi.paint(caps, th.success(), state)
+  }
+  if state == "not installed" {
+    return ansi.paint(caps, th.muted(), state)
+  }
+  ansi.paint(caps, th.warning(), state)
+}
+
+# The same cell, detecting capabilities itself, for a caller that does not carry
+# a Caps of its own. It is the final column, so painting it never disturbs the
+# alignment of the columns before it.
+fn state(s: Str) -> Str = install_cell(cp.detect(), s)
