@@ -1,0 +1,20 @@
+# spool, read by spool. The subset spool parses is comments, one-level tables,
+# quoted strings and single-line inline tables, and this file stays inside it.
+#
+# spool describes its own package the way it describes everyone else's: a package
+# manager that could not vendor itself would be asking the ecosystem to trust a
+# format it does not eat. This file is that dogfooding, and `spool resolve` run
+# in this repository reads it.
+name = "spool"
+version = "0.1.0"
+
+# Documentation only. twill has no package entry point, so spool records this
+# and shows it in `spool list`; it does not enforce it.
+entry = "src/commands.tw"
+
+[dependencies]
+# The language itself, pinned to the release whose std modules and systems subset
+# this source was written against. spool has no notion of a toolchain dependency,
+# so it is declared as an ordinary git dependency, the same way every other
+# package in the ecosystem declares it.
+twill = { version = "^1.2.0", git = "https://github.com/martin-k-m/twill" }

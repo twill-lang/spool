@@ -144,6 +144,51 @@ fn a_project_with_no_dependencies_resolves_to_nothing() {
   t.equal_i64("an empty project has no packages", len(r.packages), 0)
 }
 
+# The whole ecosystem as it actually ships: nine packages plus twill, every one
+# pinning twill at ^1.2.0, and shuttle additionally depending on selvedge. This
+# is the case the manifests in the sibling repos describe, transcribed into a
+# catalog, and it is here to catch exactly the failure that existed before the
+# pins were normalised: a split where half the ecosystem asked for twill ^0.28.0
+# and half for ^1.2.0 cannot resolve to one twill, and a workspace that names
+# them all would have reported an incompatible-constraint error instead of the
+# single graph below.
+fn the_whole_ecosystem_resolves_to_one_twill() {
+  let git = "https://github.com/martin-k-m/"
+  let twill_dep = "twill = { version = \"^1.2.0\", git = \"" + git + "twill\" }\n"
+  let cat = resolve.Catalog { versions: {}, deps: {} }
+  cat.versions[git + "twill"] = "1.2.0"
+
+  # The eight leaf packages: each depends on twill and nothing else in the graph.
+  let leaves = ["loom", "bobbin", "weft", "warp", "heddle", "skein", "selvedge", "spool"]
+  let i = 0
+  while i < len(leaves) {
+    cat.versions[git + leaves[i]] = "0.1.0"
+    cat.deps[git + leaves[i] + "@0.1.0"] = pkg(leaves[i], "0.1.0", twill_dep)
+    i = i + 1
+  }
+  # shuttle is the one package with a sibling dependency: it reads model archives
+  # through selvedge, so its manifest names both twill and selvedge.
+  cat.versions[git + "shuttle"] = "0.1.0"
+  cat.deps[git + "shuttle@0.1.0"] = pkg("shuttle", "0.1.0",
+    twill_dep + "selvedge = { version = \"^0.1.0\", git = \"" + git + "selvedge\" }\n")
+
+  # A workspace that depends on every package in the ecosystem at once.
+  let root = "loom = { version = \"^0.1.0\", git = \"" + git + "loom\" }\n"
+    + "bobbin = { version = \"^0.1.0\", git = \"" + git + "bobbin\" }\n"
+    + "weft = { version = \"^0.1.0\", git = \"" + git + "weft\" }\n"
+    + "warp = { version = \"^0.1.0\", git = \"" + git + "warp\" }\n"
+    + "heddle = { version = \"^0.1.0\", git = \"" + git + "heddle\" }\n"
+    + "skein = { version = \"^0.1.0\", git = \"" + git + "skein\" }\n"
+    + "selvedge = { version = \"^0.1.0\", git = \"" + git + "selvedge\" }\n"
+    + "shuttle = { version = \"^0.1.0\", git = \"" + git + "shuttle\" }\n"
+    + "spool = { version = \"^0.1.0\", git = \"" + git + "spool\" }\n"
+  let r = resolve.resolve(root_manifest(root), cat)
+  t.equal_str("the ecosystem resolves", r.err, "")
+  # Nine packages plus twill, once each: the transitive twill from every leaf and
+  # the transitive selvedge from shuttle collapse to one node apiece.
+  t.equal_i64("ten packages, no duplicates", len(r.packages), 10)
+}
+
 resolve_picks_the_highest_version_satisfying_a_caret_constraint()
 resolve_pulls_in_transitive_dependencies()
 resolve_narrows_an_earlier_choice_when_a_later_constraint_arrives()
@@ -154,4 +199,5 @@ resolve_rejects_one_package_name_with_two_git_sources()
 resolve_handles_a_cycle_without_looping()
 a_package_that_publishes_nothing_is_reported_as_such()
 a_project_with_no_dependencies_resolves_to_nothing()
+the_whole_ecosystem_resolves_to_one_twill()
 t.report("resolve")
