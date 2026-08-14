@@ -7,7 +7,7 @@ mode systems
 
 import "harness.tw" as t
 import "../src/strutil.tw" as s
-import "../src/sha256.tw" as sha
+import "std/hash" as sha
 import "../src/pkghash.tw" as pkghash
 
 fn the_empty_string_hashes_to_the_published_vector() {

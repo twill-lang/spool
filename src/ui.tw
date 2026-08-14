@@ -14,9 +14,9 @@ mode systems
 # ecosystem in the first place. Everything routes through ansi.paint, so a piped
 # install log comes back as the same bare verbs it always was.
 
-import "../twill_modules/twill/src/term/caps.tw" as cp
-import "../twill_modules/twill/src/term/ansi.tw" as ansi
-import "../twill_modules/twill/src/cli/theme.tw" as th
+import "std/term/caps" as cp
+import "std/term/ansi" as ansi
+import "std/term/theme" as th
 
 # Wide enough for the longest verb spool prints, "re-resolving".
 let GUTTER: I64 = 12

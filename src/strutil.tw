@@ -78,16 +78,16 @@ fn index_of(hay: Str, needle: Str) -> I64 {
   let i = 0
   while i <= h - n {
     let j = 0
-    let match = true
+    let matched = true
     while j < n {
       if hay[i + j] != needle[j] {
-        match = false
+        matched = false
         j = n
       } else {
         j = j + 1
       }
     }
-    if match {
+    if matched {
       return i
     }
     i = i + 1
@@ -253,8 +253,8 @@ fn i64_to_str(n: I64) -> Str {
   }
   let out = ""
   while v > 0 {
-    out = HEX[v - (v / 10) * 10] + out
-    v = v / 10
+    out = HEX[v % 10] + out
+    v = int(v / 10)
   }
   if neg {
     return "-" + out
@@ -263,7 +263,7 @@ fn i64_to_str(n: I64) -> Str {
 }
 
 fn hex_byte(b: I64) -> Str {
-  HEX[(b / 16) and 15] + HEX[b and 15]
+  HEX[int(b / 16) band 15] + HEX[b band 15]
 }
 
 # compare_str orders two strings by byte, returning -1, 0 or 1. Every sort in

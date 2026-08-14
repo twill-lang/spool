@@ -8,7 +8,7 @@ mode systems
 # over different bytes under the same commit, this is what notices.
 
 import "strutil.tw" as s
-import "sha256.tw" as sha
+import "std/hash" as sha
 
 let HASH_PREFIX = "sha256:"
 
