@@ -329,7 +329,7 @@ fn cmd_list(dir: Str) -> Str {
   while j < len(l.packages) {
     let e = l.packages[j]
     j = j + 1
-    if has(direct, e.name) {
+    if dict_has(direct, e.name) {
       continue
     }
     if not shown_header {

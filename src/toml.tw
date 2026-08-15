@@ -223,7 +223,7 @@ fn parse(src: Str) -> Doc {
           if len(fkey) == 0 {
             return error_doc(line_no, "expected a bare key in inline table")
           }
-          if has(fields, fkey) {
+          if dict_has(fields, fkey) {
             return error_doc(line_no, "duplicate key " + fkey + " in inline table")
           }
           let fval = unquote(field[feq + 1:len(field)])

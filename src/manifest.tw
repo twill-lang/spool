@@ -160,7 +160,7 @@ fn parse(src: Str) -> Manifest {
       return error_manifest(name_err)
     }
     let d = Dep { name: p.key, version: "", git: "" }
-    let keys = keys(p.fields)
+    let keys = dict_keys(p.fields)
     let k = 0
     while k < len(keys) {
       let key = keys[k]

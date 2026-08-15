@@ -218,7 +218,7 @@ fn build_catalog(root: Str, m: manifest.Manifest, cat: resolve.Catalog) -> Str {
   while at < len(pending) {
     let url = pending[at]
     at = at + 1
-    if has(cat.versions, url) {
+    if dict_has(cat.versions, url) {
       continue
     }
     let versions = published_versions(root, url)

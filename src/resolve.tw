@@ -46,7 +46,7 @@ fn catalog_key(git: Str, version: Str) -> Str {
 
 fn catalog_versions(cat: Catalog, git: Str) -> Arr[semver.Version] {
   let out: Arr[semver.Version] = []
-  if not has(cat.versions, git) {
+  if not dict_has(cat.versions, git) {
     return out
   }
   let raw = s.split_byte(cat.versions[git], s.B_COMMA)
@@ -67,7 +67,7 @@ fn catalog_versions(cat: Catalog, git: Str) -> Arr[semver.Version] {
 # make every catalog, including the ones in tests, noisier for nothing.
 fn catalog_deps(cat: Catalog, git: Str, version: Str) -> manifest.Manifest {
   let key = catalog_key(git, version)
-  if not has(cat.deps, key) {
+  if not dict_has(cat.deps, key) {
     return manifest.parse("name = \"unknown\"\nversion = \"" + version + "\"\n")
   }
   manifest.parse(cat.deps[key])
@@ -119,7 +119,7 @@ fn resolve(root: manifest.Manifest, cat: Catalog) -> Resolution {
         return error_resolution(unsatisfiable(name, constraint_texts[name], versions))
       }
       let picked = semver.to_str(versions[best])
-      if has(chosen, name) and chosen[name] == picked {
+      if dict_has(chosen, name) and chosen[name] == picked {
         continue
       }
       chosen[name] = picked
@@ -166,7 +166,7 @@ fn add_deps(from: Str, deps: Arr[manifest.Dep], names: Arr[Str], gits: Dict[Str,
   while i < len(deps) {
     let d = deps[i]
     i = i + 1
-    if has(gits, d.name) {
+    if dict_has(gits, d.name) {
       if gits[d.name] != d.git {
         return "package " + d.name + " is declared with two different git sources: "
           + gits[d.name] + " and " + d.git + " (from " + from + ")"
