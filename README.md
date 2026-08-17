@@ -1,9 +1,9 @@
 <p align="center">
-  <a href="https://github.com/martin-k-m/twill">
+  <a href="https://github.com/twill-lang/twill">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/martin-k-m/twill/main/assets/twill-mark-glow.png">
-      <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/martin-k-m/twill/main/assets/twill-mark.png">
-      <img alt="twill" src="https://raw.githubusercontent.com/martin-k-m/twill/main/assets/twill-mark.png" width="72">
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/twill-lang/twill/main/assets/twill-mark-glow.png">
+      <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/twill-lang/twill/main/assets/twill-mark.png">
+      <img alt="twill" src="https://raw.githubusercontent.com/twill-lang/twill/main/assets/twill-mark.png" width="72">
     </picture>
   </a>
 </p>
@@ -11,15 +11,15 @@
 <h1 align="center">spool</h1>
 
 <p align="center">
-  <b>The package manager for <a href="https://github.com/martin-k-m/twill">twill</a>.</b><br>
+  <b>The package manager for <a href="https://github.com/twill-lang/twill">twill</a>.</b><br>
   Written in twill, against a language subset that does not exist yet.
 </p>
 
 <p align="center">
-  <a href="https://github.com/martin-k-m/spool/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/martin-k-m/spool/ci.yml?branch=main&style=flat-square&label=source%20gate&labelColor=33231A&color=E3A76F"></a>
+  <a href="https://github.com/twill-lang/spool/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/twill-lang/spool/ci.yml?branch=main&style=flat-square&label=source%20gate&labelColor=33231A&color=E3A76F"></a>
   <img alt="version 0.1.0" src="https://img.shields.io/badge/version-0.1.0-E3A76F?style=flat-square&labelColor=33231A">
   <img alt="status: does not run" src="https://img.shields.io/badge/status-does%20not%20run-F2DCC6?style=flat-square&labelColor=33231A">
-  <a href="https://github.com/martin-k-m/twill"><img alt="written in twill" src="https://img.shields.io/badge/written%20in-twill-7FE3C4?style=flat-square&labelColor=12332C"></a>
+  <a href="https://github.com/twill-lang/twill"><img alt="written in twill" src="https://img.shields.io/badge/written%20in-twill-7FE3C4?style=flat-square&labelColor=12332C"></a>
   <img alt="dependencies: none" src="https://img.shields.io/badge/dependencies-none-F2DCC6?style=flat-square&labelColor=33231A">
   <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-E3A76F?style=flat-square&labelColor=33231A"></a>
 </p>
@@ -33,7 +33,7 @@ to have, not behaviour it has.
 
 spool is written in twill, in `.tw` files, and it uses `mode systems`, the
 systems subset of the language described in
-[`docs/self-hosting.md`](https://github.com/martin-k-m/twill/blob/main/docs/self-hosting.md)
+[`docs/self-hosting.md`](https://github.com/twill-lang/twill/blob/main/docs/self-hosting.md)
 in the twill repository. That subset is being built. Until it lands, and until
 twill gains a process interface and the ability to write files, none of the
 commands below execute. There is no binary to download and `spool install` will
