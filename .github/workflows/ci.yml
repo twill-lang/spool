@@ -6,10 +6,11 @@ on:
   pull_request:
     branches: [main]
 
-# spool cannot be built or run yet: it is written in twill's systems subset,
-# which is still being implemented. So CI checks the things that are checkable
-# today and says plainly that it is not checking behaviour. When `mode systems`
-# lands, the gate becomes `twill run tests/*.tw` and these checks stay.
+# Two jobs. The source gate checks the things that are true of the
+# repository whatever the compiler does, and the test job runs the suite
+# against a released twill. The second one is new: until twill 1.6 there
+# was no compiler that could run this code, and the comment here used to
+# say so.
 jobs:
   source-gate:
     runs-on: ubuntu-latest
@@ -67,9 +68,40 @@ jobs:
             fi
           done
 
-      - name: The README does not claim spool works
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The twill binary comes from a release rather than being built here.
+      # spool is written in twill and has no build of its own, so the only
+      # thing CI needs is a compiler, and a released one is the version a user
+      # would have. Pinned rather than floating: a green run should mean this
+      # code passed against a known compiler, not against whatever was newest
+      # that morning.
+      - name: Install twill v1.6.0-rc1
         run: |
-          grep -q 'spool does not run yet' README.md || {
-            echo "README.md must state that spool does not run yet"
-            exit 1
-          }
+          curl -fsSL -o twill \
+            https://github.com/twill-lang/twill/releases/download/v1.6.0-rc1/twill-v1.6.0-rc1-linux-amd64
+          chmod +x twill
+          ./twill --version
+
+      - name: Check every source file
+        run: |
+          # src/vendor.tw is the exception, and it is a decision rather than a
+          # bug: it calls `run`, a process interface twill does not have and
+          # has deliberately not added, because it is a question about the
+          # security surface of running a .tw file. Vendoring from git is the
+          # one spool feature that waits on that answer.
+          skip="src/vendor.tw"
+          fail=0
+          for f in $(find src tests examples -name '*.tw' 2>/dev/null); do
+            case " $skip " in *" $f "*) continue ;; esac
+            if ! ./twill check "$f"; then
+              fail=1
+            fi
+          done
+          exit $fail
+
+      - name: Run the tests
+        run: ./twill test tests

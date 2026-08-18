@@ -12,13 +12,13 @@
 
 <p align="center">
   <b>The package manager for <a href="https://github.com/twill-lang/twill">twill</a>.</b><br>
-  Written in twill, against a language subset that does not exist yet.
+  Written in twill, in the systems subset twill 1.6 shipped.
 </p>
 
 <p align="center">
-  <a href="https://github.com/twill-lang/spool/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/twill-lang/spool/ci.yml?branch=main&style=flat-square&label=source%20gate&labelColor=33231A&color=E3A76F"></a>
+  <a href="https://github.com/twill-lang/spool/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/twill-lang/spool/ci.yml?branch=main&style=flat-square&label=CI&labelColor=33231A&color=E3A76F"></a>
   <img alt="version 0.1.0" src="https://img.shields.io/badge/version-0.1.0-E3A76F?style=flat-square&labelColor=33231A">
-  <img alt="status: does not run" src="https://img.shields.io/badge/status-does%20not%20run-F2DCC6?style=flat-square&labelColor=33231A">
+  <img alt="status: tests passing" src="https://img.shields.io/badge/tests-passing-F2DCC6?style=flat-square&labelColor=33231A">
   <a href="https://github.com/twill-lang/twill"><img alt="written in twill" src="https://img.shields.io/badge/written%20in-twill-7FE3C4?style=flat-square&labelColor=12332C"></a>
   <img alt="dependencies: none" src="https://img.shields.io/badge/dependencies-none-F2DCC6?style=flat-square&labelColor=33231A">
   <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-E3A76F?style=flat-square&labelColor=33231A"></a>
@@ -26,27 +26,21 @@
 
 ---
 
-## spool does not run yet
+## It runs
 
-Read that first, because everything below describes behaviour spool is *written*
-to have, not behaviour it has.
+`spool` is written in twill, in `.tw` files, using `mode systems`. That subset
+did not exist when this library was written, so for a long time none of the code
+here executed and this section said so. twill 1.6 is the release that closed it:
+the 6 test suites under `tests/` pass, and CI runs them against a released
+twill on every push rather than gating on the prose in this file.
 
-spool is written in twill, in `.tw` files, and it uses `mode systems`, the
-systems subset of the language described in
-[`docs/self-hosting.md`](https://github.com/twill-lang/twill/blob/main/docs/self-hosting.md)
-in the twill repository. That subset is being built. Until it lands, and until
-twill gains a process interface and the ability to write files, none of the
-commands below execute. There is no binary to download and `spool install` will
-not install anything.
+```bash
+twill test tests
+```
 
-This repository is the program, written out in full, ahead of the language that
-runs it. That is deliberate. Writing a real program against a subset is how you
-find out what the subset is missing, and what it is missing is written down in
-[`docs/needs.md`](docs/needs.md): one entry per feature, naming the file that
-needs it and what spool does instead in the meantime.
-
-**That list is the useful output of this repository today.** The package manager
-is what the list was produced by.
+You need twill 1.6.0-rc1 or newer. `docs/needs.md` is still worth reading -- it
+is the list of what this library asked the language for, and it now records
+which of those arrived and which are still open.
 
 ## Contents
 
@@ -62,28 +56,31 @@ is what the list was produced by.
 
 ## Status
 
-"Written, unrun" means the twill source exists, is complete, and has tests that
-have never executed. Treat it as a design that compiles in someone's head.
+The source runs and its tests pass. "Blocked" below means one thing only, and it
+is the same thing in both rows: twill has no process interface, so spool cannot
+shell out to `git`, and vendoring from a git source is the one feature that
+needs to. That is a decision about the security surface of running a `.tw` file
+rather than a missing builtin, and it is the last thing between spool and doing
+its whole job.
 
 | Piece | State |
 | --- | --- |
-| `spool.toml` reader, a hand-rolled TOML subset | written, unrun |
-| Version parsing and `^` constraints | written, unrun |
-| Dependency resolver, pure and network-free | written, unrun |
-| `spool.lock` writer and reader, deterministic | written, unrun |
-| SHA-256, in twill, verified against published vectors | written, unrun |
-| Package content hashing and verification | written, unrun |
-| Vendoring into `twill_modules/` | written, blocked on file and process IO |
-| `add` / `install` / `list` / `remove` | written, blocked on file and process IO |
-| Tests | written, blocked on a test runner |
+| `spool.toml` reader, a hand-rolled TOML subset | runs, tested |
+| Version parsing and `^` constraints | runs, tested |
+| Dependency resolver, pure and network-free | runs, tested |
+| `spool.lock` writer and reader, deterministic | runs, tested |
+| SHA-256, in twill, verified against published vectors | moved to `std/hash` |
+| Package content hashing and verification | runs, tested |
+| Vendoring into `twill_modules/` | blocked: needs a process interface for git |
+| `add` / `install` / `list` / `remove` | run, except where they vendor |
+| Tests | 6 suites, run by CI on every push |
 | A registry | not planned for v0.1. Git sources only |
 | Publishing packages | not in scope. spool consumes, it does not publish |
-| Anything running end to end | no |
 
-CI reflects that honestly. There is no build step and no test run, because
-neither is possible; the workflow gates the things that *are* checkable today,
-including that this README still says spool does not run. When `mode systems`
-lands, the gate becomes `twill run tests/*.tw` and every existing check stays.
+CI runs the suites against a released twill. It also still gates the things that
+are true of the repository whatever the compiler does -- that every source file
+is twill, that nothing carries the old name or extension -- because those were
+never about whether the code executes.
 
 ## What spool is meant to do
 
