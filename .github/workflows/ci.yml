@@ -21,7 +21,11 @@ jobs:
         run: |
           stray=$(find . -path ./.git -prune -o -type f \
             ! -name '*.tw' ! -name '*.md' ! -name '*.yml' ! -name 'LICENSE' \
-            ! -name '.gitignore' -print)
+            ! -name '.gitignore' ! -name '*.toml' -print)
+          # A .toml here is the subject rather than a stray: spool.toml is
+          # spool's own manifest, in the format this repository exists to read.
+          # It was not in the list, and this gate had been red since the
+          # manifest was committed.
           if [ -n "$stray" ]; then
             echo "spool is written in twill; these files are neither .tw nor documentation:"
             echo "$stray"
@@ -79,10 +83,10 @@ jobs:
       # would have. Pinned rather than floating: a green run should mean this
       # code passed against a known compiler, not against whatever was newest
       # that morning.
-      - name: Install twill v1.6.0-rc1
+      - name: Install twill v1.6.0-rc2
         run: |
           curl -fsSL -o twill \
-            https://github.com/twill-lang/twill/releases/download/v1.6.0-rc1/twill-v1.6.0-rc1-linux-amd64
+            https://github.com/twill-lang/twill/releases/download/v1.6.0-rc2/twill-v1.6.0-rc2-linux-amd64
           chmod +x twill
           ./twill --version
 
