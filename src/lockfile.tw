@@ -12,6 +12,7 @@ mode systems
 import "strutil.tw" as s
 import "toml.tw" as toml
 import "pkghash.tw" as pkghash
+import "std/text" as text
 
 let LOCK_NAME = "spool.lock"
 
@@ -44,15 +45,22 @@ fn error_lock(msg: Str) -> Lock {
   Lock { packages: [], err: LOCK_NAME + ": " + msg }
 }
 
-fn find(l: Lock, name: Str) -> I64 {
+fn find(l: Lock, name: Str) -> Opt[I64] {
   let i = 0
   while i < len(l.packages) {
     if l.packages[i].name == name {
-      return i
+      return Some(i)
     }
     i = i + 1
   }
-  -1
+  None
+}
+
+fn has(l: Lock, name: Str) -> Bool {
+  match find(l, name) {
+    Some(_) => true,
+    None => false,
+  }
 }
 
 fn sort_entries(entries: Arr[Entry]) -> Arr[Entry] {
@@ -76,21 +84,28 @@ fn sort_entries(entries: Arr[Entry]) -> Arr[Entry] {
   out
 }
 
+# render builds into a Bytes. Six concatenations per package against a string
+# that already holds every package before it is quadratic in the size of the
+# lockfile, and the lockfile grows with the transitive dependency tree rather
+# than with anything the author wrote. The bytes produced are exactly what the
+# `+` version produced, field for field and newline for newline; this file's
+# whole point is that the same resolution renders the same bytes.
 fn render(l: Lock) -> Str {
-  let out = LOCK_HEADER + "\nversion = " + s.i64_to_str(LOCK_VERSION) + "\n"
+  let out: Bytes = bytes_new()
+  text.push_str(out, LOCK_HEADER + "\nversion = " + s.i64_to_str(LOCK_VERSION) + "\n")
   let pkgs = sort_entries(l.packages)
   let i = 0
   while i < len(pkgs) {
     let p = pkgs[i]
-    out = out + "\n[[package]]\n"
-    out = out + "name = " + toml.quote(p.name) + "\n"
-    out = out + "version = " + toml.quote(p.version) + "\n"
-    out = out + "git = " + toml.quote(p.git) + "\n"
-    out = out + "commit = " + toml.quote(p.commit) + "\n"
-    out = out + "hash = " + toml.quote(p.hash) + "\n"
+    text.push_str(out, "\n[[package]]\n")
+    text.push_str(out, "name = " + toml.quote(p.name) + "\n")
+    text.push_str(out, "version = " + toml.quote(p.version) + "\n")
+    text.push_str(out, "git = " + toml.quote(p.git) + "\n")
+    text.push_str(out, "commit = " + toml.quote(p.commit) + "\n")
+    text.push_str(out, "hash = " + toml.quote(p.hash) + "\n")
     i = i + 1
   }
-  out
+  bytes_to_str(out)
 }
 
 # parse reads a lockfile. This is a separate reader from the manifest's because
@@ -122,9 +137,9 @@ fn parse(src: Str) -> Lock {
       return error_lock(where + "unexpected table header " + line)
     }
 
-    let eq = s.index_of_byte(line, s.B_EQ)
-    if eq < 0 {
-      return error_lock(where + "expected `key = value`, got " + line)
+    let eq = match s.index_of_byte(line, s.B_EQ) {
+      Some(at) => at,
+      None => return error_lock(where + "expected `key = value`, got " + line),
     }
     let key = s.trim(line[0:eq])
     let raw = s.trim(line[eq + 1:len(line)])

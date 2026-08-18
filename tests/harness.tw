@@ -42,6 +42,37 @@ fn equal_i64(name: Str, got: I64, want: I64) {
   equal_str(name, s.i64_to_str(got), s.i64_to_str(want))
 }
 
+# The searches in strutil, manifest and lockfile return Opt[I64] rather than an
+# index-or-minus-one. These three keep the unwrapping out of the tests, so what
+# a test asserts stays on one line.
+
+fn equal_opt_i64(name: Str, got: Opt[I64], want: I64) {
+  match got {
+    Some(v) => equal_i64(name, v, want),
+    None => check(name, false),
+  }
+}
+
+fn is_none_i64(name: Str, got: Opt[I64]) {
+  match got {
+    Some(_) => check(name, false),
+    None => check(name, true),
+  }
+}
+
+# before reports whether `first` occurs before `second` in `hay`. A needle that
+# is absent fails, which is stricter than the comparison this replaced: there a
+# missing needle was -1 and still sorted before everything.
+fn before(hay: Str, first: Str, second: Str) -> Bool {
+  match s.index_of(hay, first) {
+    Some(a) => match s.index_of(hay, second) {
+      Some(b) => a < b,
+      None => false,
+    },
+    None => false,
+  }
+}
+
 fn report(suite: Str) {
   print(suite + ": " + s.i64_to_str(TESTS.passed) + " passed, " + s.i64_to_str(TESTS.failed) + " failed")
   if TESTS.failed > 0 {

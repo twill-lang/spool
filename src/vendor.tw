@@ -37,15 +37,10 @@ struct Fetched {
   err: Str,
 }
 
-fn join_path(a: Str, b: Str) -> Str {
-  if len(a) == 0 {
-    return b
-  }
-  if s.ends_with(a, "/") {
-    return a + b
-  }
-  a + "/" + b
-}
+# join_path is gone. It was a hand-rolled path_join, written when the language
+# had neither; the built-in emits a forward slash on every platform, which is
+# the property read_tree depends on, since the paths it produces go into the
+# package hash and must be identical on Windows and Linux.
 
 # cache_path names a cache directory after the repository URL. The readable
 # prefix keeps the cache browsable when something goes wrong; the digest suffix
@@ -70,7 +65,7 @@ fn cache_path(root: Str, url: Str) -> Str {
     }
     i = i + 1
   }
-  join_path(join_path(root, CACHE_DIR), safe + "-" + short_hash(url))
+  path_join(path_join(root, CACHE_DIR), safe + "-" + short_hash(url))
 }
 
 fn short_hash(v: Str) -> Str {
@@ -101,7 +96,7 @@ fn git_out(r: Str) -> Str {
 # ensure_clone clones a repository into the cache or updates an existing clone.
 fn ensure_clone(root: Str, url: Str) -> Str {
   let dir = cache_path(root, url)
-  if path_exists(join_path(dir, "HEAD")) {
+  if path_exists(path_join(dir, "HEAD")) {
     # --prune-tags so a tag deleted or moved upstream is not resurrected from
     # the local cache. Without it a stale machine resolves to a version that no
     # longer exists anywhere, which is the hardest kind of build to explain.
@@ -111,7 +106,7 @@ fn ensure_clone(root: Str, url: Str) -> Str {
     }
     return " " + dir
   }
-  mkdir_all(join_path(root, CACHE_DIR))
+  mkdir_all(path_join(root, CACHE_DIR))
   let r = git("", ["clone", "--bare", "--quiet", url, dir])
   if not git_ok(r) {
     return "!cloning " + url + ": " + git_out(r)
@@ -279,7 +274,7 @@ fn read_tree(dir: Str) -> Fetched {
   let contents: Arr[Str] = []
   let j = 0
   while j < len(paths) {
-    let body = read_file(join_path(dir, paths[j]))
+    let body = read_file(path_join(dir, paths[j]))
     push(contents, body)
     j = j + 1
   }
@@ -297,7 +292,7 @@ fn list_dir_recursive(dir: Str) -> Arr[Str] {
 }
 
 fn walk(base: Str, prefix: Str, out: Arr[Str]) {
-  let entries = list_dir(join_path(base, prefix))
+  let entries = list_dir(path_join(base, prefix))
   let i = 0
   while i < len(entries) {
     let name = entries[i]
@@ -305,13 +300,10 @@ fn walk(base: Str, prefix: Str, out: Arr[Str]) {
     if name == "." or name == ".." {
       continue
     }
-    let rel = prefix
-    if len(rel) == 0 {
-      rel = name
-    } else {
-      rel = rel + "/" + name
-    }
-    if is_dir(join_path(base, rel)) {
+    # path_join("", name) is name, which is what the top level of the walk
+    # wants, so the empty-prefix case needs no special handling here.
+    let rel = path_join(prefix, name)
+    if path_is_dir(path_join(base, rel)) {
       walk(base, rel, out)
     } else {
       push(out, rel)

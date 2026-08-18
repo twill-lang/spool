@@ -97,7 +97,7 @@ fn render_sorts_dependencies_and_round_trips() {
     ],
   }
   let out = manifest.render(m)
-  t.check("render sorts dependencies", s.index_of(out, "alpha") < s.index_of(out, "zebra"))
+  t.check("render sorts dependencies", t.before(out, "alpha", "zebra"))
   let back = manifest.parse(out)
   t.equal_str("what render writes, parse reads", back.err, "")
   t.equal_str("render is stable across a round trip", manifest.render(back), out)
@@ -123,7 +123,10 @@ fn add_dep_replaces_an_existing_dependency_rather_than_duplicating_it() {
   let out = manifest.add_dep(GOOD, manifest.Dep { name: "plotting", version: "^9.0.0", git: "https://example.com/plotting.git" })
   let m = manifest.parse(out)
   t.equal_i64("the dependency count is unchanged", len(m.deps), 2)
-  t.equal_str("the constraint was updated", m.deps[manifest.find_dep(m, "plotting")].version, "^9.0.0")
+  match manifest.find_dep(m, "plotting") {
+    Some(at) => t.equal_str("the constraint was updated", m.deps[at].version, "^9.0.0"),
+    None => t.check("the constraint was updated", false),
+  }
 }
 
 fn remove_dep_reports_whether_the_dependency_was_there() {

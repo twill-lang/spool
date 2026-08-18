@@ -22,7 +22,7 @@ struct Project {
 fn open(dir: Str) -> Project {
   let at = dir
   while true {
-    let path = vendor.join_path(at, manifest.MANIFEST_NAME)
+    let path = path_join(at, manifest.MANIFEST_NAME)
     if path_exists(path) {
       let m = manifest.parse(read_file(path))
       if len(m.err) > 0 {
@@ -41,7 +41,7 @@ fn open(dir: Str) -> Project {
 }
 
 fn load_lock(root: Str) -> lockfile.Lock {
-  let path = vendor.join_path(root, lockfile.LOCK_NAME)
+  let path = path_join(root, lockfile.LOCK_NAME)
   if not path_exists(path) {
     return lockfile.empty_lock()
   }
@@ -62,11 +62,10 @@ fn lock_satisfies(m: manifest.Manifest, l: lockfile.Lock) -> Str {
   while i < len(m.deps) {
     let d = m.deps[i]
     i = i + 1
-    let at = lockfile.find(l, d.name)
-    if at < 0 {
-      return d.name + " is declared but not locked"
+    let e = match lockfile.find(l, d.name) {
+      Some(at) => l.packages[at],
+      None => return d.name + " is declared but not locked",
     }
-    let e = l.packages[at]
     if e.git != d.git {
       return d.name + " is locked from " + e.git + " but declared from " + d.git
     }
@@ -132,9 +131,11 @@ fn cmd_install(dir: Str, update: Bool) -> Str {
       # Recomputing it would give the same answer, but reusing it means that a
       # changed hash in the diff always signals that the contents under a pinned
       # commit changed, which is exactly the alarm worth raising.
-      let prev = lockfile.find(l, pkg.name)
-      if prev >= 0 and l.packages[prev].commit == commit {
-        hash = l.packages[prev].hash
+      match lockfile.find(l, pkg.name) {
+        Some(prev) => if l.packages[prev].commit == commit {
+          hash = l.packages[prev].hash
+        },
+        None => unit,
       }
       push(next.packages, lockfile.Entry {
         name: pkg.name, version: pkg.version, git: pkg.git, commit: commit, hash: hash,
@@ -147,7 +148,7 @@ fn cmd_install(dir: Str, update: Bool) -> Str {
   if len(vendor_err) > 0 {
     return vendor_err
   }
-  write_file(vendor.join_path(p.root, lockfile.LOCK_NAME), lockfile.render(l))
+  write_file(path_join(p.root, lockfile.LOCK_NAME), lockfile.render(l))
   print(ui.vendored(vendor.VENDOR_DIR))
   ""
 }
@@ -155,12 +156,12 @@ fn cmd_install(dir: Str, update: Bool) -> Str {
 # materialise writes every locked package into the vendor directory and
 # verifies its contents against the lockfile.
 fn materialise(root: Str, l: lockfile.Lock) -> Str {
-  let vendor_root = vendor.join_path(root, vendor.VENDOR_DIR)
+  let vendor_root = path_join(root, vendor.VENDOR_DIR)
   let i = 0
   while i < len(l.packages) {
     let e = l.packages[i]
     i = i + 1
-    let dst = vendor.join_path(vendor_root, e.name)
+    let dst = path_join(vendor_root, e.name)
 
     if pkghash.is_hash(e.hash) and path_exists(dst) {
       let on_disk = vendor.read_tree(dst)
@@ -190,7 +191,7 @@ fn materialise(root: Str, l: lockfile.Lock) -> Str {
     }
   }
   prune(vendor_root, l)
-  write_file(vendor.join_path(vendor_root, "README"), vendor_readme())
+  write_file(path_join(vendor_root, "README"), vendor_readme())
   ""
 }
 
@@ -208,11 +209,11 @@ fn prune(vendor_root: Str, l: lockfile.Lock) {
     if name == "README" {
       continue
     }
-    if lockfile.find(l, name) >= 0 {
+    if lockfile.has(l, name) {
       continue
     }
     print(ui.removing(name))
-    remove_all(vendor.join_path(vendor_root, name))
+    remove_all(path_join(vendor_root, name))
   }
 }
 
@@ -267,7 +268,7 @@ fn cmd_add(dir: Str, name: Str, url: Str, requested: Str) -> Str {
     return constraint + " is not a version or a `^` range"
   }
 
-  let path = vendor.join_path(p.root, manifest.MANIFEST_NAME)
+  let path = path_join(p.root, manifest.MANIFEST_NAME)
   let d = manifest.Dep { name: name, version: constraint, git: url }
   write_file(path, manifest.add_dep(read_file(path), d))
   print(ui.added(name, constraint))
@@ -279,7 +280,7 @@ fn cmd_remove(dir: Str, name: Str) -> Str {
   if len(p.err) > 0 {
     return p.err
   }
-  let path = vendor.join_path(p.root, manifest.MANIFEST_NAME)
+  let path = path_join(p.root, manifest.MANIFEST_NAME)
   let out = manifest.remove_dep(read_file(path), name)
   if out[0] != s.B_SPACE {
     return name + " is not a declared dependency"
@@ -314,13 +315,12 @@ fn cmd_list(dir: Str) -> Str {
     let d = p.manifest.deps[i]
     i = i + 1
     direct[d.name] = d.version
-    let at = lockfile.find(l, d.name)
-    if at < 0 {
-      print("  " + s.pad_right(d.name, 20) + s.pad_right("-", 10) + s.pad_right(d.version, 10) + "not installed")
-    } else {
-      let e = l.packages[at]
-      print("  " + s.pad_right(e.name, 20) + s.pad_right(e.version, 10) + s.pad_right(d.version, 10)
-        + ui.state(install_state(p.root, e)))
+    match lockfile.find(l, d.name) {
+      Some(at) => print("  " + s.pad_right(l.packages[at].name, 20)
+        + s.pad_right(l.packages[at].version, 10) + s.pad_right(d.version, 10)
+        + ui.state(install_state(p.root, l.packages[at]))),
+      None => print("  " + s.pad_right(d.name, 20) + s.pad_right("-", 10)
+        + s.pad_right(d.version, 10) + "not installed"),
     }
   }
 
@@ -352,7 +352,7 @@ fn cmd_list(dir: Str) -> Str {
 # edited or went missing, so it re-hashes rather than trusting that the
 # directory exists.
 fn install_state(root: Str, e: lockfile.Entry) -> Str {
-  let dst = vendor.join_path(vendor.join_path(root, vendor.VENDOR_DIR), e.name)
+  let dst = path_join(path_join(root, vendor.VENDOR_DIR), e.name)
   if not path_exists(dst) {
     return "not installed"
   }
@@ -363,7 +363,7 @@ fn install_state(root: Str, e: lockfile.Entry) -> Str {
 }
 
 fn cmd_init(dir: Str, name: Str) -> Str {
-  let path = vendor.join_path(dir, manifest.MANIFEST_NAME)
+  let path = path_join(dir, manifest.MANIFEST_NAME)
   if path_exists(path) {
     return manifest.MANIFEST_NAME + " already exists"
   }

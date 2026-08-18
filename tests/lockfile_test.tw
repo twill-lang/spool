@@ -19,7 +19,7 @@ fn render_sorts_packages_regardless_of_input_order() {
   let b = lockfile.render(lockfile.Lock { packages: [entry("mid"), entry("zeta"), entry("alpha")], err: "" })
   t.equal_str("input order does not change the rendered lockfile", a, b)
   t.check("packages come out in name order",
-    s.index_of(a, "alpha") < s.index_of(a, "mid") and s.index_of(a, "mid") < s.index_of(a, "zeta"))
+    t.before(a, "alpha", "mid") and t.before(a, "mid", "zeta"))
 }
 
 fn render_is_byte_for_byte_stable_across_repeated_calls() {
@@ -97,8 +97,8 @@ fn parse_rejects_unknown_keys() {
 
 fn find_looks_up_a_package_by_name() {
   let l = lockfile.Lock { packages: [entry("a"), entry("b")], err: "" }
-  t.equal_i64("find locates a locked package", lockfile.find(l, "b"), 1)
-  t.equal_i64("find reports a package that is not locked", lockfile.find(l, "missing"), -1)
+  t.equal_opt_i64("find locates a locked package", lockfile.find(l, "b"), 1)
+  t.is_none_i64("find reports a package that is not locked", lockfile.find(l, "missing"))
 }
 
 fn an_empty_lockfile_renders_and_parses() {

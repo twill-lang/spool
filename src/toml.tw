@@ -106,7 +106,7 @@ fn unquote(raw: Str) -> Str {
     return "!"
   }
   let body = text[1:len(text) - 1]
-  if s.index_of_byte(body, q) >= 0 {
+  if s.contains_byte(body, q) {
     return "!"
   }
   if q == s.B_QUOTE and s.contains(body, "\\") {
@@ -173,16 +173,16 @@ fn parse(src: Str) -> Doc {
       if len(name) == 0 {
         return error_doc(line_no, "empty table header")
       }
-      if s.index_of_byte(name, s.B_LBRACKET) >= 0 or s.index_of_byte(name, s.B_RBRACKET) >= 0 {
+      if s.contains_byte(name, s.B_LBRACKET) or s.contains_byte(name, s.B_RBRACKET) {
         return error_doc(line_no, "spool.toml does not use array-of-table headers")
       }
       table = name
       continue
     }
 
-    let eq = s.index_of_byte(line, s.B_EQ)
-    if eq < 0 {
-      return error_doc(line_no, "expected `key = value`, got " + line)
+    let eq = match s.index_of_byte(line, s.B_EQ) {
+      Some(at) => at,
+      None => return error_doc(line_no, "expected `key = value`, got " + line),
     }
     let key = parse_key(line[0:eq])
     if len(key) == 0 {
@@ -215,9 +215,9 @@ fn parse(src: Str) -> Doc {
           if len(field) == 0 {
             return error_doc(line_no, "empty field in inline table")
           }
-          let feq = s.index_of_byte(field, s.B_EQ)
-          if feq < 0 {
-            return error_doc(line_no, "expected `key = value` in inline table, got " + field)
+          let feq = match s.index_of_byte(field, s.B_EQ) {
+            Some(at) => at,
+            None => return error_doc(line_no, "expected `key = value` in inline table, got " + field),
           }
           let fkey = parse_key(field[0:feq])
           if len(fkey) == 0 {
@@ -256,5 +256,5 @@ fn quote(v: Str) -> Str {
 }
 
 fn quotable(v: Str) -> Bool {
-  s.index_of_byte(v, s.B_QUOTE) < 0 and not s.contains(v, "\\")
+  not s.contains_byte(v, s.B_QUOTE) and not s.contains(v, "\\")
 }

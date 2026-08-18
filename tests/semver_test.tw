@@ -62,13 +62,19 @@ fn unsupported_constraint_syntax_is_rejected_rather_than_widened() {
 fn highest_matching_picks_the_greatest_version_satisfying_every_constraint() {
   let versions = [semver.parse("1.0.0"), semver.parse("1.4.2"), semver.parse("2.0.0")]
   let one = [semver.parse_constraint("^1.0.0")]
-  t.equal_str("^1.0.0 picks 1.4.2", semver.to_str(versions[semver.highest_matching(versions, one)]), "1.4.2")
+  match semver.highest_matching(versions, one) {
+    Some(at) => t.equal_str("^1.0.0 picks 1.4.2", semver.to_str(versions[at]), "1.4.2"),
+    None => t.check("^1.0.0 picks 1.4.2", false),
+  }
 
   let both = [semver.parse_constraint("^1.0.0"), semver.parse_constraint("1.0.0")]
-  t.equal_str("^1.0.0 with 1.0.0 picks 1.0.0", semver.to_str(versions[semver.highest_matching(versions, both)]), "1.0.0")
+  match semver.highest_matching(versions, both) {
+    Some(at) => t.equal_str("^1.0.0 with 1.0.0 picks 1.0.0", semver.to_str(versions[at]), "1.0.0"),
+    None => t.check("^1.0.0 with 1.0.0 picks 1.0.0", false),
+  }
 
   let impossible = [semver.parse_constraint("^1.0.0"), semver.parse_constraint("^2.0.0")]
-  t.equal_i64("^1 and ^2 together match nothing", semver.highest_matching(versions, impossible), -1)
+  t.is_none_i64("^1 and ^2 together match nothing", semver.highest_matching(versions, impossible))
 }
 
 parse_accepts_a_plain_triple_and_a_leading_v()

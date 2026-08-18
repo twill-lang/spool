@@ -114,9 +114,9 @@ fn resolve(root: manifest.Manifest, cat: Catalog) -> Resolution {
       let git = gits[name]
       let versions = catalog_versions(cat, git)
       let cs = constraints_of(constraint_texts[name])
-      let best = semver.highest_matching(versions, cs)
-      if best < 0 {
-        return error_resolution(unsatisfiable(name, constraint_texts[name], versions))
+      let best = match semver.highest_matching(versions, cs) {
+        Some(at) => at,
+        None => return error_resolution(unsatisfiable(name, constraint_texts[name], versions)),
       }
       let picked = semver.to_str(versions[best])
       if dict_has(chosen, name) and chosen[name] == picked {
@@ -194,9 +194,11 @@ fn constraints_of(joined: Str) -> Arr[semver.Constraint] {
   let i = 0
   while i < len(parts) {
     let text = s.trim(parts[i])
-    let space = s.index_of_byte(text, s.B_SPACE)
-    if space > 0 {
-      text = text[0:space]
+    # The text carries "^1.0.0 required by a 1.0.0"; only the constraint itself
+    # is wanted here, and a leading space would leave nothing to parse.
+    match s.index_of_byte(text, s.B_SPACE) {
+      Some(space) => if space > 0 { text = text[0:space] },
+      None => unit,
     }
     if len(text) > 0 {
       let c = semver.parse_constraint(text)

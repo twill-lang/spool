@@ -84,15 +84,22 @@ fn validate_entry(entry: Str) -> Str {
   ""
 }
 
-fn find_dep(m: Manifest, name: Str) -> I64 {
+fn find_dep(m: Manifest, name: Str) -> Opt[I64] {
   let i = 0
   while i < len(m.deps) {
     if m.deps[i].name == name {
-      return i
+      return Some(i)
     }
     i = i + 1
   }
-  -1
+  None
+}
+
+fn has_dep(m: Manifest, name: Str) -> Bool {
+  match find_dep(m, name) {
+    Some(_) => true,
+    None => false,
+  }
 }
 
 # sort_deps is an insertion sort by name. Dependency lists are tens of entries
@@ -185,7 +192,7 @@ fn parse(src: Str) -> Manifest {
     if len(d.git) == 0 {
       return error_manifest("dependency " + d.name + ": missing `git`; v0.1 of spool resolves git sources only, there is no registry")
     }
-    if find_dep(m, d.name) >= 0 {
+    if has_dep(m, d.name) {
       return error_manifest("dependency " + d.name + " is declared twice")
     }
     push(m.deps, d)
@@ -218,6 +225,11 @@ fn parse(src: Str) -> Manifest {
 # same manifest always produces the same bytes. The cost is that comments and
 # hand-formatting are lost, which is why `spool add` edits the text instead;
 # see add_dep. render is for `spool init` and for tests.
+#
+# It keeps `+` rather than a Bytes builder. The loop runs once per declared
+# dependency, tens of times at most, and the whole function runs once per
+# `spool init`. Quadratic on a handful of short lines costs nothing, and the
+# concatenations read as the file they produce.
 fn render(m: Manifest) -> Str {
   let out = "name = " + toml.quote(m.name) + "\n"
   out = out + "version = " + toml.quote(m.version) + "\n"
@@ -248,6 +260,10 @@ fn dep_line(d: Dep) -> Str {
 fn add_dep(src: Str, d: Dep) -> Str {
   let lines = s.split_lines(src)
   let table = ""
+  # These two stay -1 rather than becoming Opt[I64]. They are the state of a
+  # scan over the file, updated as it goes and read arithmetically at the
+  # bottom (`deps_start + 1`, `deps_end` defaulting to the line count); an Opt
+  # would be unwrapped at every one of those uses to get the same number back.
   let deps_start = -1
   let deps_end = -1
   let i = 0
@@ -265,10 +281,12 @@ fn add_dep(src: Str, d: Dep) -> Str {
       continue
     }
     if table == "dependencies" and len(line) > 0 {
-      let eq = s.index_of_byte(line, s.B_EQ)
-      if eq >= 0 and toml.parse_key(line[0:eq]) == d.name {
-        lines[i] = dep_line(d)
-        return s.join(lines, "\n")
+      match s.index_of_byte(line, s.B_EQ) {
+        Some(eq) => if toml.parse_key(line[0:eq]) == d.name {
+          lines[i] = dep_line(d)
+          return s.join(lines, "\n")
+        },
+        None => unit,
       }
     }
     i = i + 1
@@ -324,17 +342,19 @@ fn remove_dep(src: Str, name: Str) -> Str {
       continue
     }
     if table == "dependencies" and len(line) > 0 {
-      let eq = s.index_of_byte(line, s.B_EQ)
-      if eq >= 0 and toml.parse_key(line[0:eq]) == name {
-        let out: Arr[Str] = []
-        let k = 0
-        while k < len(lines) {
-          if k != i {
-            push(out, lines[k])
+      match s.index_of_byte(line, s.B_EQ) {
+        Some(eq) => if toml.parse_key(line[0:eq]) == name {
+          let out: Arr[Str] = []
+          let k = 0
+          while k < len(lines) {
+            if k != i {
+              push(out, lines[k])
+            }
+            k = k + 1
           }
-          k = k + 1
-        }
-        return " " + s.join(out, "\n")
+          return " " + s.join(out, "\n")
+        },
+        None => unit,
       }
     }
     i = i + 1

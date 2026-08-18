@@ -20,17 +20,20 @@ struct Version {
   ok: Bool,
 }
 
+# A constraint is one of three shapes, and two of them are measured against a
+# version while the third is not. As an I64 tag beside a `base: Version` field
+# that had to be filled in with a meaningless value for `*`, nothing stopped a
+# reader of `base` from trusting it in the one case where it means nothing. The
+# payload puts the version where it applies and nowhere else, and it makes the
+# dispatch in `matches` exhaustive: a fourth constraint form is a check error
+# here rather than a silent fall-through into the caret arm.
+enum ConstraintKind { Exact(Version), Caret(Version), Any }
+
 struct Constraint {
-  # kind is 0 for exact, 1 for caret, 2 for any.
-  kind: I64,
-  base: Version,
+  kind: ConstraintKind,
   text: Str,
   ok: Bool,
 }
-
-let CONSTRAINT_EXACT = 0
-let CONSTRAINT_CARET = 1
-let CONSTRAINT_ANY = 2
 
 fn bad_version() -> Version {
   Version { major: 0, minor: 0, patch: 0, ok: false }
@@ -46,13 +49,22 @@ fn parse(raw: Str) -> Version {
   if len(parts) != 3 {
     return bad_version()
   }
-  let major = s.parse_i64(parts[0])
-  let minor = s.parse_i64(parts[1])
-  let patch = s.parse_i64(parts[2])
-  if major < 0 or minor < 0 or patch < 0 {
-    return bad_version()
+  match parse_triple(parts) {
+    Some(v) => v,
+    None => bad_version(),
   }
-  Version { major: major, minor: minor, patch: patch, ok: true }
+}
+
+# parse_triple is where the three components are read. `?` needs an enclosing
+# function returning an Opt and `parse` returns a Version carrying its own `ok`
+# field, so the three fallible reads live here and `parse` turns the one failure
+# into a bad_version. Written inline that is three nested matches around one
+# struct literal.
+fn parse_triple(parts: Arr[Str]) -> Opt[Version] {
+  let major = s.parse_i64(parts[0])?
+  let minor = s.parse_i64(parts[1])?
+  let patch = s.parse_i64(parts[2])?
+  Some(Version { major: major, minor: minor, patch: patch, ok: true })
 }
 
 fn to_str(v: Version) -> Str {
@@ -82,7 +94,7 @@ fn compare(a: Version, b: Version) -> I64 {
 }
 
 fn bad_constraint(text: Str) -> Constraint {
-  Constraint { kind: CONSTRAINT_EXACT, base: bad_version(), text: text, ok: false }
+  Constraint { kind: Exact(bad_version()), text: text, ok: false }
 }
 
 # parse_constraint reads "1.2.3" (exact), "^1.2.3" (compatible) or "*" (any).
@@ -93,46 +105,54 @@ fn bad_constraint(text: Str) -> Constraint {
 fn parse_constraint(raw: Str) -> Constraint {
   let text = s.trim(raw)
   if text == "*" {
-    return Constraint { kind: CONSTRAINT_ANY, base: bad_version(), text: "*", ok: true }
+    return Constraint { kind: Any, text: "*", ok: true }
   }
   if s.starts_with(text, "^") {
     let base = parse(s.trim_prefix(text, "^"))
     if not base.ok {
       return bad_constraint(text)
     }
-    return Constraint { kind: CONSTRAINT_CARET, base: base, text: "^" + to_str(base), ok: true }
+    return Constraint { kind: Caret(base), text: "^" + to_str(base), ok: true }
   }
   let base = parse(text)
   if not base.ok {
     return bad_constraint(text)
   }
-  Constraint { kind: CONSTRAINT_EXACT, base: base, text: to_str(base), ok: true }
+  Constraint { kind: Exact(base), text: to_str(base), ok: true }
 }
 
 fn matches(c: Constraint, v: Version) -> Bool {
-  if c.kind == CONSTRAINT_ANY {
-    return true
+  match c.kind {
+    Any => true,
+    Exact(base) => compare(v, base) == 0,
+    Caret(base) => caret_matches(base, v),
   }
-  if c.kind == CONSTRAINT_EXACT {
-    return compare(v, c.base) == 0
-  }
-  if compare(v, c.base) < 0 {
+}
+
+fn caret_matches(base: Version, v: Version) -> Bool {
+  if compare(v, base) < 0 {
     return false
   }
   # Below 1.0.0 the leftmost non-zero component carries the breaking changes,
   # so ^0.2.1 admits 0.2.x but not 0.3.0, and ^0.0.3 admits only 0.0.x.
-  if c.base.major > 0 {
-    return v.major == c.base.major
+  if base.major > 0 {
+    return v.major == base.major
   }
-  if c.base.minor > 0 {
-    return v.major == 0 and v.minor == c.base.minor
+  if base.minor > 0 {
+    return v.major == 0 and v.minor == base.minor
   }
   v.major == 0 and v.minor == 0
 }
 
 # highest_matching returns the index into `versions` of the greatest version
-# satisfying every constraint in `cs`, or -1 when none does.
-fn highest_matching(versions: Arr[Version], cs: Arr[Constraint]) -> I64 {
+# satisfying every constraint in `cs`. None means no version satisfies them all,
+# which is a resolution failure the caller has to report, and it used to be a -1
+# that indexed `versions` from the end if anyone forgot to check.
+#
+# `best` stays a plain I64 inside the loop. It is the running position of a
+# scan, not a value handed to anyone, and the check at the bottom is what turns
+# it into an answer.
+fn highest_matching(versions: Arr[Version], cs: Arr[Constraint]) -> Opt[I64] {
   let best = -1
   let i = 0
   while i < len(versions) {
@@ -152,5 +172,8 @@ fn highest_matching(versions: Arr[Version], cs: Arr[Constraint]) -> I64 {
     }
     i = i + 1
   }
-  best
+  if best < 0 {
+    return None
+  }
+  Some(best)
 }

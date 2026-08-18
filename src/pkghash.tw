@@ -9,6 +9,7 @@ mode systems
 
 import "strutil.tw" as s
 import "std/hash" as sha
+import "std/text" as text
 
 let HASH_PREFIX = "sha256:"
 
@@ -24,15 +25,29 @@ let HASH_PREFIX = "sha256:"
 # File modes are not covered. They do not survive a Windows checkout, and a hash
 # that passes on one platform and fails on another is worse than one that
 # ignores the field.
+# It builds into a Bytes. This is the one loop in spool that concatenates whole
+# file contents: with `+`, hashing a hundred-file package copies the growing
+# string once per file, so the cost is quadratic in the size of the package
+# rather than linear. The bytes are unchanged -- same header, same field order,
+# same single space and single newline -- because they are what the hash is of,
+# and a different serialisation here would invalidate every lockfile in
+# existence.
 fn canonical(paths: Arr[Str], contents: Arr[Str]) -> Str {
-  let out = "spool-tree-v1\n" + s.i64_to_str(len(paths)) + "\n"
+  let out: Bytes = bytes_new()
+  text.push_str(out, "spool-tree-v1\n" + s.i64_to_str(len(paths)) + "\n")
   let i = 0
   while i < len(paths) {
     let p = paths[i]
-    out = out + s.i64_to_str(len(p)) + " " + p + " " + s.i64_to_str(len(contents[i])) + "\n" + contents[i]
+    text.push_str(out, s.i64_to_str(len(p)))
+    text.push_str(out, " ")
+    text.push_str(out, p)
+    text.push_str(out, " ")
+    text.push_str(out, s.i64_to_str(len(contents[i])))
+    text.push_str(out, "\n")
+    text.push_str(out, contents[i])
     i = i + 1
   }
-  out
+  bytes_to_str(out)
 }
 
 # hash_tree hashes a package's files. paths must already be sorted and must use

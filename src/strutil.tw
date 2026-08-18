@@ -8,6 +8,8 @@ mode systems
 # directly. See docs/needs.md: this file is the one that would shrink most if
 # the language grew a small string library.
 
+import "std/text" as text
+
 # Byte constants. There is no character literal in the subset, so each one is
 # read out of a one-byte string. Naming them is not decoration: `b == 34` in the
 # middle of a parser is unreadable and a wrong constant is a silent bug.
@@ -63,17 +65,25 @@ fn is_empty(s: Str) -> Bool {
   len(s) == 0
 }
 
-# index_of returns the first offset of `needle` in `hay`, or -1. The naive scan
-# is quadratic in the worst case and that is fine: it runs over manifest lines,
+# The two searches that answer "is it there, and where" return an Opt, and the
+# one that answers "where do I cut" returns an offset. That split is deliberate
+# rather than an oversight. A caller of index_of always branches on whether the
+# needle was found at all, and `-1` made that branch a convention the checker
+# could not enforce; a caller of last_index_of_byte below uses the answer as an
+# arithmetic cut point where "not found" and "before the first byte" want the
+# same code, and wrapping it would only be unwrapped again on the next line.
+
+# index_of returns the first offset of `needle` in `hay`. The naive scan is
+# quadratic in the worst case and that is fine: it runs over manifest lines,
 # never over a package's source.
-fn index_of(hay: Str, needle: Str) -> I64 {
+fn index_of(hay: Str, needle: Str) -> Opt[I64] {
   let n = len(needle)
   let h = len(hay)
   if n == 0 {
-    return 0
+    return Some(0)
   }
   if n > h {
-    return -1
+    return None
   }
   let i = 0
   while i <= h - n {
@@ -88,24 +98,28 @@ fn index_of(hay: Str, needle: Str) -> I64 {
       }
     }
     if matched {
-      return i
+      return Some(i)
     }
     i = i + 1
   }
-  -1
+  None
 }
 
-fn index_of_byte(hay: Str, b: I64) -> I64 {
+fn index_of_byte(hay: Str, b: I64) -> Opt[I64] {
   let i = 0
   while i < len(hay) {
     if hay[i] == b {
-      return i
+      return Some(i)
     }
     i = i + 1
   }
-  -1
+  None
 }
 
+# last_index_of_byte keeps the -1. Both callers want the byte after the last
+# separator, and `hay[cut + 1:]` is already the whole string when there is no
+# separator at all, so the sentinel is doing arithmetic rather than standing in
+# for a missing value.
 fn last_index_of_byte(hay: Str, b: I64) -> I64 {
   let i = len(hay) - 1
   while i >= 0 {
@@ -118,7 +132,20 @@ fn last_index_of_byte(hay: Str, b: I64) -> I64 {
 }
 
 fn contains(hay: Str, needle: Str) -> Bool {
-  index_of(hay, needle) >= 0
+  match index_of(hay, needle) {
+    Some(_) => true,
+    None => false,
+  }
+}
+
+# contains_byte is the presence half of index_of_byte. Several callers only ask
+# whether a byte occurs, and spelling that as a match on an Opt they immediately
+# throw away reads worse than a predicate.
+fn contains_byte(hay: Str, b: I64) -> Bool {
+  match index_of_byte(hay, b) {
+    Some(_) => true,
+    None => false,
+  }
 }
 
 fn starts_with(s: Str, prefix: Str) -> Bool {
@@ -192,19 +219,24 @@ fn split_lines(s: Str) -> Arr[Str] {
   out
 }
 
+# join builds into a Bytes because add_dep and remove_dep join every line of a
+# whole manifest back together. With `+` that is quadratic in the file, and the
+# file is the one input whose size spool does not control.
 fn join(parts: Arr[Str], sep: Str) -> Str {
-  let out = ""
+  let out: Bytes = bytes_new()
   let i = 0
   while i < len(parts) {
     if i > 0 {
-      out = out + sep
+      text.push_str(out, sep)
     }
-    out = out + parts[i]
+    text.push_str(out, parts[i])
     i = i + 1
   }
-  out
+  bytes_to_str(out)
 }
 
+# repeat keeps `+`. Its only caller is pad_right, which asks for at most twenty
+# spaces, and twenty copies is not a loop worth a builder.
 fn repeat(s: Str, n: I64) -> Str {
   let out = ""
   let i = 0
@@ -223,23 +255,27 @@ fn pad_right(s: Str, width: I64) -> Str {
   s + repeat(" ", width - len(s))
 }
 
-# parse_i64 reads an unsigned decimal number. It returns -1 for anything else,
-# including the empty string and a leading sign, because every number spool
-# parses is a version component and a negative one is meaningless.
-fn parse_i64(s: Str) -> I64 {
+# parse_i64 reads an unsigned decimal number and returns None for anything
+# else, including the empty string and a leading sign, because every number
+# spool parses is a version component and a negative one is meaningless.
+#
+# The digit loop is kept rather than deferring to i64_of_str: that one accepts a
+# leading `-`, so "1.-2.3" would parse as a version and then have to be rejected
+# again by a range check somewhere downstream.
+fn parse_i64(s: Str) -> Opt[I64] {
   if len(s) == 0 {
-    return -1
+    return None
   }
   let n = 0
   let i = 0
   while i < len(s) {
     if not is_digit(s[i]) {
-      return -1
+      return None
     }
     n = n * 10 + (s[i] - B_ZERO)
     i = i + 1
   }
-  n
+  Some(n)
 }
 
 fn i64_to_str(n: I64) -> Str {
