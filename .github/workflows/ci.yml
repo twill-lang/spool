@@ -90,6 +90,10 @@ jobs:
           chmod +x twill
           ./twill --version
 
+      # Every .tw file in the repository, not a fixed list of directories.
+      # The list used to be `src tests examples`, which silently excluded
+      # anything else: bobbin's suites/ and spool's main.tw were both real
+      # programs that CI never checked, and both were broken because of it.
       - name: Check every source file
         run: |
           # src/vendor.tw is the exception, and it is a decision rather than a
@@ -97,9 +101,10 @@ jobs:
           # has deliberately not added, because it is a question about the
           # security surface of running a .tw file. Vendoring from git is the
           # one spool feature that waits on that answer.
-          skip="src/vendor.tw"
+          # Paths as `find .` prints them, with the leading "./".
+          skip="./src/vendor.tw"
           fail=0
-          for f in $(find src tests examples -name '*.tw' 2>/dev/null) main.tw; do
+          for f in $(find . -name '*.tw'); do
             case " $skip " in *" $f "*) continue ;; esac
             if ! ./twill check "$f"; then
               fail=1
