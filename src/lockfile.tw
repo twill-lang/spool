@@ -161,11 +161,10 @@ fn parse(src: Str) -> Res[Lock, Str] {
       continue
     }
 
-    let val = toml.unquote(raw)
-    if not toml.unquote_ok(val) {
-      return Err(error_lock(where + "expected a quoted string for " + key))
+    let v: Str = match toml.unquote(raw) {
+      Some(text) => text,
+      None => return Err(error_lock(where + "expected a quoted string for " + key)),
     }
-    let v = toml.unquote_value(val)
     let last = len(l.packages) - 1
     if key == "name" {
       l.packages[last].name = v

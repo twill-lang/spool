@@ -73,45 +73,48 @@ fn short_hash(v: Str) -> Str {
   h[0:16]
 }
 
-# git runs the git binary and returns its standard output, prefixed with a
-# status byte: "!" and a message on failure, " " and the output on success.
+# git runs the git binary and answers with its output or its complaint.
 #
 # Shelling out to git rather than speaking the protocol is what borrows the
 # user's existing credentials, proxies and host keys, and it is the whole reason
 # a package manager can avoid a network dependency. The cost is a hard
 # requirement on git being on PATH, which spool reports plainly rather than
 # failing obscurely.
-fn git(dir: Str, argv: Arr[Str]) -> Str {
-  run("git", argv, dir)
-}
-
-fn git_ok(r: Str) -> Bool {
-  r[0] == s.B_SPACE
-}
-
-fn git_out(r: Str) -> Str {
-  r[1:len(r)]
+# `Ok` carries git's output, `Err` carries git's complaint.
+#
+# `run` answers with a status BYTE in front of its output -- `"!"` for a
+# non-zero exit, `" "` otherwise -- because the subset could not return two
+# values. That convention leaked into every caller in this file, along with a
+# `git_ok`/`git_out` pair whose only job was to make it survivable; docs/needs.md
+# entry 10 calls it the ugliest thing in spool. It stops here now: `run`'s
+# encoding is unwrapped once, at the one place that calls it.
+fn git(dir: Str, argv: Arr[Str]) -> Res[Str, Str] {
+  let r = run("git", argv, dir)
+  if r[0] == s.B_SPACE {
+    return Ok(r[1:len(r)])
+  }
+  Err(r[1:len(r)])
 }
 
 # ensure_clone clones a repository into the cache or updates an existing clone.
-fn ensure_clone(root: Str, url: Str) -> Str {
+fn ensure_clone(root: Str, url: Str) -> Res[Str, Str] {
   let dir = cache_path(root, url)
   if path_exists(path_join(dir, "HEAD")) {
     # --prune-tags so a tag deleted or moved upstream is not resurrected from
     # the local cache. Without it a stale machine resolves to a version that no
     # longer exists anywhere, which is the hardest kind of build to explain.
-    let r = git(dir, ["fetch", "--tags", "--prune", "--prune-tags", "--quiet", "origin"])
-    if not git_ok(r) {
-      return "!updating " + url + ": " + git_out(r)
+    match git(dir, ["fetch", "--tags", "--prune", "--prune-tags", "--quiet", "origin"]) {
+      Ok(_) => unit,
+      Err(why) => return Err("updating " + url + ": " + why),
     }
-    return " " + dir
+    return Ok(dir)
   }
   mkdir_all(path_join(root, CACHE_DIR))
-  let r = git("", ["clone", "--bare", "--quiet", url, dir])
-  if not git_ok(r) {
-    return "!cloning " + url + ": " + git_out(r)
+  match git("", ["clone", "--bare", "--quiet", url, dir]) {
+    Ok(_) => unit,
+    Err(why) => return Err("cloning " + url + ": " + why),
   }
-  " " + dir
+  Ok(dir)
 }
 
 # published_versions lists a repository's version tags. A tag that is not a
@@ -120,15 +123,15 @@ fn ensure_clone(root: Str, url: Str) -> Str {
 # would be obstructive.
 fn published_versions(root: Str, url: Str) -> Arr[Str] {
   let out: Arr[Str] = []
-  let c = ensure_clone(root, url)
-  if not git_ok(c) {
-    return out
+  let dir: Str = match ensure_clone(root, url) {
+    Ok(at) => at,
+    Err(_) => return out,
   }
-  let r = git(git_out(c), ["tag", "--list"])
-  if not git_ok(r) {
-    return out
+  let listed: Str = match git(dir, ["tag", "--list"]) {
+    Ok(text) => text,
+    Err(_) => return out,
   }
-  let lines = s.split_lines(git_out(r))
+  let lines = s.split_lines(listed)
   let i = 0
   while i < len(lines) {
     let tag = s.trim(lines[i])
@@ -144,56 +147,43 @@ fn published_versions(root: Str, url: Str) -> Arr[Str] {
 # tag_for finds the spelling, "1.2.3" or "v1.2.3", that the repository actually
 # uses. Both are common in the wild and guessing wrong produces a confusing
 # "no such tag" for a tag the user can see in their own repository.
-fn tag_for(dir: Str, version: Str) -> Str {
+fn tag_for(dir: Str, version: Str) -> Opt[Str] {
   let candidates = ["v" + version, version]
   let i = 0
   while i < len(candidates) {
-    let r = git(dir, ["rev-parse", "--verify", "--quiet", candidates[i] + "^{commit}"])
-    if git_ok(r) {
-      return candidates[i]
+    match git(dir, ["rev-parse", "--verify", "--quiet", candidates[i] + "^{commit}"]) {
+      Ok(_) => return Some(candidates[i]),
+      Err(_) => unit,
     }
     i = i + 1
   }
-  ""
+  None
 }
 
 # commit_for resolves a version to the exact commit its tag points at. That is
 # what the lockfile records, so a later install cannot follow a tag that has
 # since been moved to different code.
-fn commit_for(root: Str, url: Str, version: Str) -> Str {
-  let c = ensure_clone(root, url)
-  if not git_ok(c) {
-    return "!" + git_out(c)
+fn commit_for(root: Str, url: Str, version: Str) -> Res[Str, Str] {
+  let dir: Str = ensure_clone(root, url)?
+  let tag: Str = match tag_for(dir, version) {
+    Some(t) => t,
+    None => return Err(url + " has no tag " + version + " or v" + version),
   }
-  let dir = git_out(c)
-  let tag = tag_for(dir, version)
-  if len(tag) == 0 {
-    return "!" + url + " has no tag " + version + " or v" + version
-  }
-  let r = git(dir, ["rev-list", "-n", "1", tag])
-  if not git_ok(r) {
-    return "!" + git_out(r)
-  }
-  " " + s.trim(git_out(r))
+  Ok(s.trim(git(dir, ["rev-list", "-n", "1", tag])?))
 }
 
 # read_manifest_at reads a package's own spool.toml at a version without
 # checking the repository out.
-fn read_manifest_at(root: Str, url: Str, version: Str) -> Str {
-  let c = ensure_clone(root, url)
-  if not git_ok(c) {
-    return "!" + git_out(c)
+fn read_manifest_at(root: Str, url: Str, version: Str) -> Res[Str, Str] {
+  let dir: Str = ensure_clone(root, url)?
+  let tag: Str = match tag_for(dir, version) {
+    Some(t) => t,
+    None => return Err(url + " has no tag " + version + " or v" + version),
   }
-  let dir = git_out(c)
-  let tag = tag_for(dir, version)
-  if len(tag) == 0 {
-    return "!" + url + " has no tag " + version + " or v" + version
+  match git(dir, ["show", tag + ":" + manifest.MANIFEST_NAME]) {
+    Ok(text) => Ok(text),
+    Err(_) => Err(url + " has no " + manifest.MANIFEST_NAME + " at " + tag),
   }
-  let r = git(dir, ["show", tag + ":" + manifest.MANIFEST_NAME])
-  if not git_ok(r) {
-    return "!" + url + " has no " + manifest.MANIFEST_NAME + " at " + tag
-  }
-  r
 }
 
 # build_catalog fills a resolver Catalog from git. This is where the network
@@ -222,13 +212,14 @@ fn build_catalog(root: Str, m: manifest.Manifest, cat: resolve.Catalog) -> Res[U
     while v < len(versions) {
       let src = read_manifest_at(root, url, versions[v])
       v = v + 1
-      if not git_ok(src) {
-        continue
+      let text: Str = match src {
+        Ok(body) => body,
+        Err(_) => continue,
       }
-      match manifest.parse(git_out(src)) {
+      match manifest.parse(text) {
         Err(_) => continue,
         Ok(sub) => {
-          cat.deps[resolve.catalog_key(url, versions[v - 1])] = git_out(src)
+          cat.deps[resolve.catalog_key(url, versions[v - 1])] = text
           let d = 0
           while d < len(sub.deps) {
             push(pending, sub.deps[d].git)
@@ -245,15 +236,12 @@ fn build_catalog(root: Str, m: manifest.Manifest, cat: resolve.Catalog) -> Res[U
 # rather than a checkout, so nothing from the repository's working state or its
 # .git directory can end up in the vendored copy.
 fn export(root: Str, url: Str, commit: Str, dst: Str) -> Res[Unit, Str] {
-  let c = ensure_clone(root, url)
-  if not git_ok(c) {
-    return Err(git_out(c))
-  }
+  let dir: Str = ensure_clone(root, url)?
   remove_all(dst)
   mkdir_all(dst)
-  let r = git(git_out(c), ["--work-tree=" + dst, "checkout", "--force", commit, "--", "."])
-  if not git_ok(r) {
-    return Err("exporting " + commit + ": " + git_out(r))
+  match git(dir, ["--work-tree=" + dst, "checkout", "--force", commit, "--", "."]) {
+    Ok(_) => unit,
+    Err(why) => return Err("exporting " + commit + ": " + why),
   }
   Ok(unit)
 }

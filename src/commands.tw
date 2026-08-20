@@ -119,11 +119,10 @@ fn cmd_install(dir: Str, update: Bool) -> Res[Unit, Str] {
     while i < len(r.packages) {
       let pkg = r.packages[i]
       i = i + 1
-      let c = vendor.commit_for(p.root, pkg.git, pkg.version)
-      if not vendor.git_ok(c) {
-        return Err(pkg.name + " " + pkg.version + ": " + vendor.git_out(c))
+      let commit: Str = match vendor.commit_for(p.root, pkg.git, pkg.version) {
+        Ok(at) => at,
+        Err(why) => return Err(pkg.name + " " + pkg.version + ": " + why),
       }
-      let commit = vendor.git_out(c)
       let hash = ""
       # Carry a previously recorded hash forward when the commit has not moved.
       # Recomputing it would give the same answer, but reusing it means that a
@@ -270,11 +269,11 @@ fn cmd_add(dir: Str, name: Str, url: Str, requested: Str) -> Res[Unit, Str] {
 fn cmd_remove(dir: Str, name: Str) -> Res[Unit, Str] {
   let p: Project = open(dir)?
   let path = path_join(p.root, manifest.MANIFEST_NAME)
-  let out = manifest.remove_dep(read_text(path)?, name)
-  if out[0] != s.B_SPACE {
-    return Err(name + " is not a declared dependency")
+  let out: Str = match manifest.remove_dep(read_text(path)?, name) {
+    Some(text) => text,
+    None => return Err(name + " is not a declared dependency"),
   }
-  write_file(path, out[1:len(out)])
+  write_file(path, out)
   print(ui.removed(name))
   # A full re-resolve, not a reinstall. The lockfile does not record which
   # dependency required what, so re-resolving is the only way to learn which

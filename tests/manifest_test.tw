@@ -165,12 +165,18 @@ fn add_dep_replaces_an_existing_dependency_rather_than_duplicating_it() {
 }
 
 fn remove_dep_reports_whether_the_dependency_was_there() {
-  let out = manifest.remove_dep(GOOD, "plotting")
-  t.check("remove_dep found a declared dependency", out[0] == s.B_SPACE)
-  let m = parsed(manifest.parse(out[1:len(out)]))
+  let out: Str = match manifest.remove_dep(GOOD, "plotting") {
+    Some(text) => text,
+    None => abort("remove_dep did not find a declared dependency"),
+  }
+  let m = parsed(manifest.parse(out))
   t.equal_i64("one dependency is left", len(m.deps), 1)
   t.equal_str("the right one is left", m.deps[0].name, "tensorstats")
-  t.check("remove_dep reports a dependency that is not declared", manifest.remove_dep(GOOD, "nothing")[0] != s.B_SPACE)
+  t.check("remove_dep reports a dependency that is not declared",
+    match manifest.remove_dep(GOOD, "nothing") {
+      None => true,
+      Some(_) => false,
+    })
 }
 
 parse_reads_name_version_entry_and_dependencies()

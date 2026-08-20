@@ -157,8 +157,8 @@ the wrong field. `src/semver.tw` has a `Constraint` with an `I64` `kind` and a
 ### 10. `Res[T, E]`, `Opt[T]`, and returning two values
 
 **Would improve:** every file.
-**Status:** the `err`-field half is done (2026-08, on twill 1.7); the `"!"`-flag
-half is not, and is now the ugliest thing left in the package.
+**Status:** done, both halves (2026-08, on twill 1.7). Neither convention
+survives anywhere in spool.
 
 **Done.** `Doc`, `Manifest`, `Lock`, `Resolution` and `Project` have lost their
 `err` fields, and every function that returned a `Str` that was empty on
@@ -184,12 +184,22 @@ or touches a file:
    twill 1.6.1, so the whole program ran twice: `spool init` wrote the manifest
    and then reported that it already existed, and exited 1.
 
-**Still to do: the `"!"`-flag convention**, which this entry rightly calls the
-worse of the two. A `Str` whose first byte is a status flag -- `" "` for success
-with the value following, `"!"` for failure with the message following --
-survives in `toml.unquote`, `manifest.remove_dep`, `vendor.git` and
-`vendor.commit_for`, with `git_ok`/`git_out` accessors existing only to make it
-survivable. `Res[Str, Str]` is exactly that type and the change is mechanical.
+**The `"!"`-flag convention is gone too**, which this entry rightly called the
+worse of the two: a `Str` whose first byte said whether the rest was a value or
+a message. `toml.unquote` and `manifest.remove_dep` are `Opt[Str]` -- neither
+had a message to carry, only "there isn't one" -- and `vendor.git`,
+`ensure_clone`, `commit_for` and `read_manifest_at` are `Res[Str, Str]`.
+`tag_for` is `Opt[Str]`.
+
+`git_ok` and `git_out` are deleted. They existed only to make the flag
+survivable, and every one of the sixteen places that called them is now a
+`match` or a `?`. `run`'s own flag-byte encoding is unwrapped exactly once, in
+`git`, which is the only function that calls it -- so the convention stops at
+the boundary instead of leaking through the package.
+
+What that removes is a class of silent wrongness, not lines: `unquote_value`
+without `unquote_ok` gave a value with a leading space; `remove_dep`'s result
+written without slicing gave a manifest with one. Both compiled.
 
 *What the entry said while it was open:*
 

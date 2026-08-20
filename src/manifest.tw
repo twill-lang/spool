@@ -310,10 +310,14 @@ fn add_dep(src: Str, d: Dep) -> Str {
   s.join(out, "\n")
 }
 
-# remove_dep deletes a dependency line. The returned string is prefixed with a
-# status byte: "!" when the dependency was not declared, " " otherwise. The
-# subset has no way to return two values; see docs/needs.md.
-fn remove_dep(src: Str, name: Str) -> Str {
+# remove_dep deletes a dependency line, and answers `None` when the dependency
+# was not declared.
+#
+# This used to prefix the returned text with a status BYTE -- `"!"` for absent,
+# `" "` otherwise -- because the subset could not return two values, so every
+# caller sliced `[1:len(out)]` to get the manifest back and a caller that forgot
+# wrote a manifest with a leading space.
+fn remove_dep(src: Str, name: Str) -> Opt[Str] {
   let lines = s.split_lines(src)
   let table = ""
   let i = 0
@@ -335,12 +339,12 @@ fn remove_dep(src: Str, name: Str) -> Str {
             }
             k = k + 1
           }
-          return " " + s.join(out, "\n")
+          return Some(s.join(out, "\n"))
         },
         None => unit,
       }
     }
     i = i + 1
   }
-  "!"
+  None
 }

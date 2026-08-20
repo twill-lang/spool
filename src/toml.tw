@@ -92,37 +92,33 @@ fn parse_key(raw: Str) -> Str {
 
 # unquote reads a quoted string. Escape sequences are not interpreted: a package
 # name, version or git URL never needs one, and refusing to read a backslash
-# means a Windows-style path in a manifest reads back byte for byte. The
-# returned string is prefixed with a status byte because the subset cannot
-# return two values; "!" means failure, " " means success.
-fn unquote(raw: Str) -> Str {
+# means a Windows-style path in a manifest reads back byte for byte.
+#
+# `None` is "not a quoted string". This used to return the value with a status
+# BYTE in front of it -- `"!"` for failure, `" "` for success -- because the
+# subset could not return two values, and the caller had to remember to strip
+# the byte with `unquote_value` after testing it with `unquote_ok`. A caller
+# that forgot got a value with a leading space in it, silently.
+fn unquote(raw: Str) -> Opt[Str] {
   let text = s.trim(raw)
   if len(text) < 2 {
-    return "!"
+    return None
   }
   let q = text[0]
   if q != s.B_QUOTE and q != s.B_APOS {
-    return "!"
+    return None
   }
   if text[len(text) - 1] != q {
-    return "!"
+    return None
   }
   let body = text[1:len(text) - 1]
   if s.contains_byte(body, q) {
-    return "!"
+    return None
   }
   if q == s.B_QUOTE and s.contains(body, "\\") {
-    return "!"
+    return None
   }
-  " " + body
-}
-
-fn unquote_ok(r: Str) -> Bool {
-  r[0] == s.B_SPACE
-}
-
-fn unquote_value(r: Str) -> Str {
-  r[1:len(r)]
+  Some(body)
 }
 
 # split_fields splits an inline table body on commas that sit outside quotes, so
@@ -228,11 +224,10 @@ fn parse(src: Str) -> Res[Doc, Str] {
           if dict_has(fields, fkey) {
             return Err(error_doc(line_no, "duplicate key " + fkey + " in inline table"))
           }
-          let fval = unquote(field[feq + 1:len(field)])
-          if not unquote_ok(fval) {
-            return Err(error_doc(line_no, "expected a quoted string for " + fkey))
+          fields[fkey] = match unquote(field[feq + 1:len(field)]) {
+            Some(v) => v,
+            None => return Err(error_doc(line_no, "expected a quoted string for " + fkey)),
           }
-          fields[fkey] = unquote_value(fval)
           p = p + 1
         }
       }
@@ -240,12 +235,12 @@ fn parse(src: Str) -> Res[Doc, Str] {
       continue
     }
 
-    let val = unquote(raw)
-    if not unquote_ok(val) {
-      return Err(error_doc(line_no, "expected a quoted string for " + key))
+    let val: Str = match unquote(raw) {
+      Some(v) => v,
+      None => return Err(error_doc(line_no, "expected a quoted string for " + key)),
     }
     let empty: Dict[Str, Str] = {}
-    push(doc.pairs, Pair { table: table, key: key, value: unquote_value(val), fields: empty, is_table: false, line: line_no })
+    push(doc.pairs, Pair { table: table, key: key, value: val, fields: empty, is_table: false, line: line_no })
   }
   Ok(doc)
 }
