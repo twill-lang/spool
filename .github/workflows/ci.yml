@@ -114,3 +114,23 @@ jobs:
 
       - name: Run the tests
         run: ./twill test tests
+
+      # spool has no examples; main.tw is the program. The suite calls the
+      # command functions directly with fixture strings, so it never goes
+      # through main and never touches a file -- which is how three bugs that
+      # made every command fail survived: cwd() and read_file() were bound as
+      # the Res they return and handed to functions expecting a Str, and the
+      # file called main() itself so the whole program ran twice.
+      #
+      # init and list are the two commands that need no network. Anything that
+      # vendors needs git and a remote, and is left out.
+      - name: Smoke the CLI
+        run: |
+          bin="$PWD/twill"
+          main="$PWD/main.tw"
+          tmp=$(mktemp -d)
+          cd "$tmp"
+          "$bin" run "$main" init demo
+          test -f spool.toml
+          "$bin" run "$main" list
+          "$bin" run "$main" help > /dev/null
