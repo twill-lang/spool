@@ -157,9 +157,42 @@ the wrong field. `src/semver.tw` has a `Constraint` with an `I64` `kind` and a
 ### 10. `Res[T, E]`, `Opt[T]`, and returning two values
 
 **Would improve:** every file.
-**Status:** designed in section 1.2, excluded from milestone 1.
+**Status:** the `err`-field half is done (2026-08, on twill 1.7); the `"!"`-flag
+half is not, and is now the ugliest thing left in the package.
 
-This is the ugliest workaround in spool and it is worth looking at directly.
+**Done.** `Doc`, `Manifest`, `Lock`, `Resolution` and `Project` have lost their
+`err` fields, and every function that returned a `Str` that was empty on
+success returns a `Res` instead: `toml.parse`, `manifest.parse`,
+`validate_name`, `validate_entry`, `lockfile.parse`, `resolve.resolve`,
+`catalog_deps`, `pkghash.verify`, `commands.open`, `load_lock`,
+`lock_satisfies`, `materialise`, all five `cmd_*`, and `vendor.build_catalog`
+and `export`. `main.check` takes the `Res`, so there is no message to take the
+length of and no way to pass one that was never read.
+
+**Three bugs this found, none of which the tests could see**, because the suite
+calls the command functions with fixture strings and never goes through `main`
+or touches a file:
+
+1. `main` bound `cwd()` -- a `Res[Str, Str]` -- and handed it to `path_join`, so
+   every command died with "path_join expects strings" before doing anything.
+   `spool init` has been broken since `cwd` gained that return type.
+2. `open` and `load_lock` passed `read_file(path)` -- also a `Res` -- straight
+   into a parser, which took the length of it. Every command that opens a
+   project failed the same way.
+3. `main.tw` ended with a `main()` call. `twill run` executes a systems-mode
+   file's top level and *then* calls `main()` itself, which it has done since
+   twill 1.6.1, so the whole program ran twice: `spool init` wrote the manifest
+   and then reported that it already existed, and exited 1.
+
+**Still to do: the `"!"`-flag convention**, which this entry rightly calls the
+worse of the two. A `Str` whose first byte is a status flag -- `" "` for success
+with the value following, `"!"` for failure with the message following --
+survives in `toml.unquote`, `manifest.remove_dep`, `vendor.git` and
+`vendor.commit_for`, with `git_ok`/`git_out` accessors existing only to make it
+survivable. `Res[Str, Str]` is exactly that type and the change is mechanical.
+
+*What the entry said while it was open:*
+
 Functions that can fail return one of:
 
 - a struct with an `err: Str` field that is empty on success

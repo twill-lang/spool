@@ -34,15 +34,17 @@ struct Entry {
 
 struct Lock {
   packages: Arr[Entry],
-  err: Str,
 }
 
 fn empty_lock() -> Lock {
-  Lock { packages: [], err: "" }
+  Lock { packages: [] }
 }
 
-fn error_lock(msg: Str) -> Lock {
-  Lock { packages: [], err: LOCK_NAME + ": " + msg }
+# The message a lockfile parse failure carries. This built a `Lock` whose `err`
+# field held it and whose package list was empty, so a caller who did not test
+# the field saw a project with no dependencies rather than a broken lockfile.
+fn error_lock(msg: Str) -> Str {
+  LOCK_NAME + ": " + msg
 }
 
 fn find(l: Lock, name: Str) -> Opt[I64] {
@@ -113,7 +115,7 @@ fn render(l: Lock) -> Str {
 # hand-written file with inline tables. Sharing one reader would mean each
 # accepting syntax the other should reject, which is how a hand-edited lockfile
 # ends up parsing.
-fn parse(src: Str) -> Lock {
+fn parse(src: Str) -> Res[Lock, Str] {
   let l = empty_lock()
   let seen_version = false
   let in_package = false
@@ -134,34 +136,34 @@ fn parse(src: Str) -> Lock {
       continue
     }
     if line[0] == s.B_LBRACKET {
-      return error_lock(where + "unexpected table header " + line)
+      return Err(error_lock(where + "unexpected table header " + line))
     }
 
     let eq = match s.index_of_byte(line, s.B_EQ) {
       Some(at) => at,
-      None => return error_lock(where + "expected `key = value`, got " + line),
+      None => return Err(error_lock(where + "expected `key = value`, got " + line)),
     }
     let key = s.trim(line[0:eq])
     let raw = s.trim(line[eq + 1:len(line)])
 
     if not in_package {
       if key != "version" {
-        return error_lock(where + "unknown top-level key " + key)
+        return Err(error_lock(where + "unknown top-level key " + key))
       }
       if seen_version {
-        return error_lock(where + "duplicate `version`")
+        return Err(error_lock(where + "duplicate `version`"))
       }
       seen_version = true
       if raw != s.i64_to_str(LOCK_VERSION) {
-        return error_lock(where + "lockfile format version " + raw + "; this spool writes version "
-          + s.i64_to_str(LOCK_VERSION) + ", so upgrade spool or delete the lockfile and reinstall")
+        return Err(error_lock(where + "lockfile format version " + raw + "; this spool writes version "
+          + s.i64_to_str(LOCK_VERSION) + ", so upgrade spool or delete the lockfile and reinstall"))
       }
       continue
     }
 
     let val = toml.unquote(raw)
     if not toml.unquote_ok(val) {
-      return error_lock(where + "expected a quoted string for " + key)
+      return Err(error_lock(where + "expected a quoted string for " + key))
     }
     let v = toml.unquote_value(val)
     let last = len(l.packages) - 1
@@ -185,33 +187,33 @@ fn parse(src: Str) -> Lock {
       l.packages[last].hash = v
       continue
     }
-    return error_lock(where + "unknown package key " + key)
+    return Err(error_lock(where + "unknown package key " + key))
   }
 
   if not seen_version {
-    return error_lock("missing `version`; this does not look like a spool lockfile")
+    return Err(error_lock("missing `version`; this does not look like a spool lockfile"))
   }
   let i = 0
   while i < len(l.packages) {
     let p = l.packages[i]
     if len(p.name) == 0 {
-      return error_lock("a [[package]] entry has no `name`")
+      return Err(error_lock("a [[package]] entry has no `name`"))
     }
     if len(p.version) == 0 or len(p.git) == 0 or len(p.commit) == 0 or len(p.hash) == 0 {
-      return error_lock("package " + p.name + " is missing a required field")
+      return Err(error_lock("package " + p.name + " is missing a required field"))
     }
     if not pkghash.is_hash(p.hash) {
-      return error_lock("package " + p.name + " has a hash spool cannot verify: " + p.hash)
+      return Err(error_lock("package " + p.name + " has a hash spool cannot verify: " + p.hash))
     }
     let j = 0
     while j < i {
       if l.packages[j].name == p.name {
-        return error_lock("package " + p.name + " is locked twice")
+        return Err(error_lock("package " + p.name + " is locked twice"))
       }
       j = j + 1
     }
     i = i + 1
   }
   l.packages = sort_entries(l.packages)
-  l
+  Ok(l)
 }

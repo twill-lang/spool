@@ -14,38 +14,48 @@ import "ui.tw" as ui
 struct Project {
   root: Str,
   manifest: manifest.Manifest,
-  err: Str,
 }
+
+# `read_file` returns a `Res[Str, Str]`. Every call in this file used to pass it
+# straight into a parser, which then took the length of a `Res` -- so `spool
+# list` and every other command that opens a project died with "len expects a
+# tensor, list, string, dict or bytes" before reaching any of its own logic.
+# Nothing caught it: the tests call the command functions with fixture text and
+# never read a file.
+fn read_text(path: Str) -> Res[Str, Str] = read_file(path)
 
 # open walks up from dir looking for a spool.toml, so spool can be run from a
 # subdirectory of a project the way git can.
-fn open(dir: Str) -> Project {
+fn open(dir: Str) -> Res[Project, Str] {
   let at = dir
   while true {
     let path = path_join(at, manifest.MANIFEST_NAME)
     if path_exists(path) {
-      let m = manifest.parse(read_file(path))
-      if len(m.err) > 0 {
-        return Project { root: at, manifest: m, err: manifest.MANIFEST_NAME + ": " + m.err }
+      let text: Str = read_text(path)?
+      let m: manifest.Manifest = match manifest.parse(text) {
+        Ok(parsed) => parsed,
+        Err(msg) => return Err(manifest.MANIFEST_NAME + ": " + msg),
       }
-      return Project { root: at, manifest: m, err: "" }
+      return Ok(Project { root: at, manifest: m })
     }
     let cut = s.last_index_of_byte(at, s.B_SLASH)
     if cut <= 0 {
-      return Project { root: "", manifest: manifest.error_manifest(""), err:
-        "no " + manifest.MANIFEST_NAME + " here or in any parent directory; run `spool init` first" }
+      return Err("no " + manifest.MANIFEST_NAME
+        + " here or in any parent directory; run `spool init` first")
     }
     at = at[0:cut]
   }
-  Project { root: "", manifest: manifest.error_manifest(""), err: "unreachable" }
+  Err("unreachable")
 }
 
-fn load_lock(root: Str) -> lockfile.Lock {
+# An absent lockfile is an empty one and not a failure: a project nobody has
+# installed yet is the ordinary first-run state.
+fn load_lock(root: Str) -> Res[lockfile.Lock, Str] {
   let path = path_join(root, lockfile.LOCK_NAME)
   if not path_exists(path) {
-    return lockfile.empty_lock()
+    return Ok(lockfile.empty_lock())
   }
-  lockfile.parse(read_file(path))
+  lockfile.parse(read_text(path)?)
 }
 
 # lock_satisfies reports whether every declared dependency has a lock entry
@@ -57,25 +67,25 @@ fn load_lock(root: Str) -> lockfile.Lock {
 # dependencies, because the lockfile does not record which package required
 # what; a changed transitive constraint is caught the next time the tree is
 # resolved, and `spool install --update` forces that.
-fn lock_satisfies(m: manifest.Manifest, l: lockfile.Lock) -> Str {
+fn lock_satisfies(m: manifest.Manifest, l: lockfile.Lock) -> Res[Unit, Str] {
   let i = 0
   while i < len(m.deps) {
     let d = m.deps[i]
     i = i + 1
     let e = match lockfile.find(l, d.name) {
       Some(at) => l.packages[at],
-      None => return d.name + " is declared but not locked",
+      None => return Err(d.name + " is declared but not locked"),
     }
     if e.git != d.git {
-      return d.name + " is locked from " + e.git + " but declared from " + d.git
+      return Err(d.name + " is locked from " + e.git + " but declared from " + d.git)
     }
     let c = semver.parse_constraint(d.version)
     let v = semver.parse(e.version)
     if not v.ok {
-      return d.name + " has an unreadable locked version " + e.version
+      return Err(d.name + " has an unreadable locked version " + e.version)
     }
     if not semver.matches(c, v) {
-      return d.name + " is locked at " + e.version + ", which no longer satisfies " + c.text
+      return Err(d.name + " is locked at " + e.version + ", which no longer satisfies " + c.text)
     }
   }
   # A locked package the manifest does not name is assumed to be transitive.
@@ -83,39 +93,27 @@ fn lock_satisfies(m: manifest.Manifest, l: lockfile.Lock) -> Str {
   # genuine orphan from a package that some dependency pulled in. The
   # consequence is that dropping a dependency does not by itself make the lock
   # unsatisfying, which is why `remove` re-resolves rather than relying on this.
-  ""
+  Ok(unit)
 }
 
-fn cmd_install(dir: Str, update: Bool) -> Str {
-  let p = open(dir)
-  if len(p.err) > 0 {
-    return p.err
-  }
-  let l = load_lock(p.root)
-  if len(l.err) > 0 {
-    return l.err
-  }
+fn cmd_install(dir: Str, update: Bool) -> Res[Unit, Str] {
+  let p: Project = open(dir)?
+  let l: lockfile.Lock = load_lock(p.root)?
 
   let reuse = false
   if len(l.packages) > 0 and not update {
-    let why = lock_satisfies(p.manifest, l)
-    if len(why) == 0 {
-      reuse = true
-    } else {
-      print(ui.reresolving(why))
+    match lock_satisfies(p.manifest, l) {
+      Ok(_) => reuse = true,
+      # Not a failure: the lock no longer matches the manifest, which is the
+      # ordinary reason to resolve again, and the message says which dependency.
+      Err(why) => print(ui.reresolving(why)),
     }
   }
 
   if not reuse {
     let cat = resolve.Catalog { versions: {}, deps: {} }
-    let build_err = vendor.build_catalog(p.root, p.manifest, cat)
-    if len(build_err) > 0 {
-      return build_err
-    }
-    let r = resolve.resolve(p.manifest, cat)
-    if len(r.err) > 0 {
-      return r.err
-    }
+    vendor.build_catalog(p.root, p.manifest, cat)?
+    let r: resolve.Resolution = resolve.resolve(p.manifest, cat)?
     let next = lockfile.empty_lock()
     let i = 0
     while i < len(r.packages) {
@@ -123,7 +121,7 @@ fn cmd_install(dir: Str, update: Bool) -> Str {
       i = i + 1
       let c = vendor.commit_for(p.root, pkg.git, pkg.version)
       if not vendor.git_ok(c) {
-        return pkg.name + " " + pkg.version + ": " + vendor.git_out(c)
+        return Err(pkg.name + " " + pkg.version + ": " + vendor.git_out(c))
       }
       let commit = vendor.git_out(c)
       let hash = ""
@@ -144,18 +142,15 @@ fn cmd_install(dir: Str, update: Bool) -> Str {
     l = next
   }
 
-  let vendor_err = materialise(p.root, l)
-  if len(vendor_err) > 0 {
-    return vendor_err
-  }
+  materialise(p.root, l)?
   write_file(path_join(p.root, lockfile.LOCK_NAME), lockfile.render(l))
   print(ui.vendored(vendor.VENDOR_DIR))
-  ""
+  Ok(unit)
 }
 
 # materialise writes every locked package into the vendor directory and
 # verifies its contents against the lockfile.
-fn materialise(root: Str, l: lockfile.Lock) -> Str {
+fn materialise(root: Str, l: lockfile.Lock) -> Res[Unit, Str] {
   let vendor_root = path_join(root, vendor.VENDOR_DIR)
   let i = 0
   while i < len(l.packages) {
@@ -174,7 +169,7 @@ fn materialise(root: Str, l: lockfile.Lock) -> Str {
     print(ui.fetching(e.name, e.version, short_commit(e.commit)))
     let export_err = vendor.export(root, e.git, e.commit, dst)
     if len(export_err) > 0 {
-      return export_err
+      return Err(export_err)
     }
     let got = vendor.read_tree(dst)
     if not pkghash.is_hash(e.hash) {
@@ -187,12 +182,12 @@ fn materialise(root: Str, l: lockfile.Lock) -> Str {
     if len(bad) > 0 {
       # The bad tree is left in place. Deleting the evidence of a mismatch makes
       # it impossible to find out what actually arrived.
-      return bad + "\nthe fetched tree was left in " + dst + " for inspection"
+      return Err(bad + "\nthe fetched tree was left in " + dst + " for inspection")
     }
   }
   prune(vendor_root, l)
   write_file(path_join(vendor_root, "README"), vendor_readme())
-  ""
+  Ok(unit)
 }
 
 # prune removes vendored directories nothing locks, so the vendor directory
@@ -233,15 +228,12 @@ fn short_commit(commit: Str) -> Str {
   commit
 }
 
-fn cmd_add(dir: Str, name: Str, url: Str, requested: Str) -> Str {
+fn cmd_add(dir: Str, name: Str, url: Str, requested: Str) -> Res[Unit, Str] {
   let name_err = manifest.validate_name(name)
   if len(name_err) > 0 {
-    return name_err
+    return Err(name_err)
   }
-  let p = open(dir)
-  if len(p.err) > 0 {
-    return p.err
-  }
+  let p: Project = open(dir)?
 
   let constraint = requested
   if len(constraint) == 0 {
@@ -250,7 +242,7 @@ fn cmd_add(dir: Str, name: Str, url: Str, requested: Str) -> Str {
     # into the next major release of a dependency.
     let versions = vendor.published_versions(p.root, url)
     if len(versions) == 0 {
-      return url + " publishes no version tags that spool can read; pass a version explicitly"
+      return Err(url + " publishes no version tags that spool can read; pass a version explicitly")
     }
     let sorted = s.sort_strs(versions)
     let best = semver.parse(sorted[0])
@@ -265,25 +257,22 @@ fn cmd_add(dir: Str, name: Str, url: Str, requested: Str) -> Str {
     constraint = "^" + semver.to_str(best)
   }
   if not semver.parse_constraint(constraint).ok {
-    return constraint + " is not a version or a `^` range"
+    return Err(constraint + " is not a version or a `^` range")
   }
 
   let path = path_join(p.root, manifest.MANIFEST_NAME)
   let d = manifest.Dep { name: name, version: constraint, git: url }
-  write_file(path, manifest.add_dep(read_file(path), d))
+  write_file(path, manifest.add_dep(read_text(path)?, d))
   print(ui.added(name, constraint))
   cmd_install(dir, false)
 }
 
-fn cmd_remove(dir: Str, name: Str) -> Str {
-  let p = open(dir)
-  if len(p.err) > 0 {
-    return p.err
-  }
+fn cmd_remove(dir: Str, name: Str) -> Res[Unit, Str] {
+  let p: Project = open(dir)?
   let path = path_join(p.root, manifest.MANIFEST_NAME)
-  let out = manifest.remove_dep(read_file(path), name)
+  let out = manifest.remove_dep(read_text(path)?, name)
   if out[0] != s.B_SPACE {
-    return name + " is not a declared dependency"
+    return Err(name + " is not a declared dependency")
   }
   write_file(path, out[1:len(out)])
   print(ui.removed(name))
@@ -293,20 +282,17 @@ fn cmd_remove(dir: Str, name: Str) -> Str {
   cmd_install(dir, true)
 }
 
-fn cmd_list(dir: Str) -> Str {
-  let p = open(dir)
-  if len(p.err) > 0 {
-    return p.err
-  }
-  let l = load_lock(p.root)
-  if len(l.err) > 0 {
-    return l.err
-  }
+fn cmd_list(dir: Str) -> Res[Unit, Str] {
+  let p: Project = open(dir)?
+  let l: lockfile.Lock = load_lock(p.root)?
 
   print(p.manifest.name + " " + p.manifest.version)
   if len(p.manifest.deps) == 0 {
     print("  no dependencies declared")
-    return ""
+    # An early SUCCESS: there is nothing more to list. Under the old convention
+    # this was `return ""`, the same two bytes as the success at the bottom of
+    # the function, so nothing said which it was.
+    return Ok(unit)
   }
 
   let direct: Dict[Str, Str] = {}
@@ -344,7 +330,7 @@ fn cmd_list(dir: Str) -> Str {
     print("")
     print("no " + lockfile.LOCK_NAME + " yet; run `spool install`")
   }
-  ""
+  Ok(unit)
 }
 
 # install_state reports whether what is on disk matches what the lockfile
@@ -362,19 +348,19 @@ fn install_state(root: Str, e: lockfile.Entry) -> Str {
   "ok"
 }
 
-fn cmd_init(dir: Str, name: Str) -> Str {
+fn cmd_init(dir: Str, name: Str) -> Res[Unit, Str] {
   let path = path_join(dir, manifest.MANIFEST_NAME)
   if path_exists(path) {
-    return manifest.MANIFEST_NAME + " already exists"
+    return Err(manifest.MANIFEST_NAME + " already exists")
   }
-  let name_err = manifest.validate_name(name)
-  if len(name_err) > 0 {
-    return name_err + "; pass one: spool init <name>"
+  match manifest.validate_name(name) {
+    Ok(_) => unit,
+    Err(msg) => return Err(msg + "; pass one: spool init <name>"),
   }
   let m = manifest.Manifest {
-    name: name, version: "0.1.0", entry: name + ".tw", deps: [], err: "",
+    name: name, version: "0.1.0", entry: name + ".tw", deps: [],
   }
   write_file(path, manifest.render(m))
   print("wrote " + manifest.MANIFEST_NAME)
-  ""
+  Ok(unit)
 }

@@ -33,11 +33,6 @@ struct Resolved {
 
 struct Resolution {
   packages: Arr[Resolved],
-  err: Str,
-}
-
-fn error_resolution(msg: Str) -> Resolution {
-  Resolution { packages: [], err: msg }
 }
 
 fn catalog_key(git: Str, version: Str) -> Str {
@@ -65,7 +60,7 @@ fn catalog_versions(cat: Catalog, git: Str) -> Arr[semver.Version] {
 # package whose entry is missing is treated as having no dependencies, because a
 # leaf package is the common case and requiring an explicit empty entry would
 # make every catalog, including the ones in tests, noisier for nothing.
-fn catalog_deps(cat: Catalog, git: Str, version: Str) -> manifest.Manifest {
+fn catalog_deps(cat: Catalog, git: Str, version: Str) -> Res[manifest.Manifest, Str] {
   let key = catalog_key(git, version)
   if not dict_has(cat.deps, key) {
     return manifest.parse("name = \"unknown\"\nversion = \"" + version + "\"\n")
@@ -83,7 +78,7 @@ fn catalog_deps(cat: Catalog, git: Str, version: Str) -> manifest.Manifest {
 # the same name. A flat graph makes that impossible. The cost is that two
 # dependencies which genuinely disagree fail to resolve instead of both getting
 # what they asked for, and for this language that is the right way round.
-fn resolve(root: manifest.Manifest, cat: Catalog) -> Resolution {
+fn resolve(root: manifest.Manifest, cat: Catalog) -> Res[Resolution, Str] {
   # names is the packages under consideration, in insertion order; the sort at
   # the end is what makes the output order independent of it.
   let names: Arr[Str] = []
@@ -95,7 +90,7 @@ fn resolve(root: manifest.Manifest, cat: Catalog) -> Resolution {
 
   let err = add_deps(root.name, root.deps, names, gits, constraint_texts)
   if len(err) > 0 {
-    return error_resolution(err)
+    return Err(err)
   }
 
   # Each pass picks the best version for every name under the constraints known
@@ -116,7 +111,7 @@ fn resolve(root: manifest.Manifest, cat: Catalog) -> Resolution {
       let cs = constraints_of(constraint_texts[name])
       let best = match semver.highest_matching(versions, cs) {
         Some(at) => at,
-        None => return error_resolution(unsatisfiable(name, constraint_texts[name], versions)),
+        None => return Err(unsatisfiable(name, constraint_texts[name], versions)),
       }
       let picked = semver.to_str(versions[best])
       if dict_has(chosen, name) and chosen[name] == picked {
@@ -125,13 +120,13 @@ fn resolve(root: manifest.Manifest, cat: Catalog) -> Resolution {
       chosen[name] = picked
       changed = true
 
-      let m = catalog_deps(cat, git, picked)
-      if len(m.err) > 0 {
-        return error_resolution("package " + name + " " + picked + ": " + m.err)
+      let m: manifest.Manifest = match catalog_deps(cat, git, picked) {
+        Ok(parsed) => parsed,
+        Err(msg) => return Err("package " + name + " " + picked + ": " + msg),
       }
       let sub_err = add_deps(name + " " + picked, m.deps, names, gits, constraint_texts)
       if len(sub_err) > 0 {
-        return error_resolution(sub_err)
+        return Err(sub_err)
       }
     }
     if not changed {
@@ -139,7 +134,7 @@ fn resolve(root: manifest.Manifest, cat: Catalog) -> Resolution {
     } else {
       pass = pass + 1
       if pass == 100 {
-        return error_resolution("dependency resolution did not settle after 100 passes; the constraints are cyclic")
+        return Err("dependency resolution did not settle after 100 passes; the constraints are cyclic")
       }
     }
   }
@@ -152,7 +147,7 @@ fn resolve(root: manifest.Manifest, cat: Catalog) -> Resolution {
     push(out, Resolved { name: name, version: chosen[name], git: gits[name] })
     k = k + 1
   }
-  Resolution { packages: out, err: "" }
+  Ok(Resolution { packages: out })
 }
 
 # add_deps records each dependency's constraint and git source, rejecting one

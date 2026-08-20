@@ -80,13 +80,13 @@ fn is_hash(v: Str) -> Bool {
 # verify compares a computed hash against a locked one and returns an empty
 # string on success. The message shows both digests, because a mismatch without
 # them tells the user something is wrong and nothing about what.
-fn verify(name: Str, got: Str, want: Str) -> Str {
+fn verify(name: Str, got: Str, want: Str) -> Res[Unit, Str] {
   if not is_hash(want) {
-    return "the lockfile hash for " + name + " is not a sha256 digest, so spool cannot verify it"
+    return Err("the lockfile hash for " + name + " is not a sha256 digest, so spool cannot verify it")
   }
   if got == want {
-    return ""
+    return Ok(unit)
   }
-  "integrity check failed for " + name + "\n  locked:  " + want + "\n  fetched: " + got
-    + "\nthe contents under that commit are not what the lockfile recorded"
+  Err("integrity check failed for " + name + "\n  locked:  " + want + "\n  fetched: " + got
+    + "\nthe contents under that commit are not what the lockfile recorded")
 }

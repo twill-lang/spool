@@ -4,6 +4,25 @@ import "harness.tw" as t
 import "../src/strutil.tw" as s
 import "../src/lockfile.tw" as lockfile
 
+# `lockfile.parse` returns a `Res` now. `parsed` is for the cases that must succeed -- a
+# failure there is the fixture being wrong, not the property under test -- and
+# `refusal` gives the message for the cases that must be rejected, so each
+# assertion keeps saying what it said before.
+fn parsed(r: Res[lockfile.Lock, Str]) -> lockfile.Lock {
+  match r {
+    Ok(v) => v,
+    Err(msg) => abort("the test expected this to parse: " + msg),
+  }
+}
+
+fn refusal(r: Res[lockfile.Lock, Str]) -> Str {
+  match r {
+    Err(msg) => msg,
+    Ok(_) => "",
+  }
+}
+
+
 fn entry(name: Str) -> lockfile.Entry {
   lockfile.Entry {
     name: name,
@@ -34,8 +53,7 @@ fn render_is_byte_for_byte_stable_across_repeated_calls() {
 
 fn a_rendered_lockfile_parses_back_to_the_same_packages() {
   let l = lockfile.Lock { packages: [entry("beta"), entry("alpha")], err: "" }
-  let back = lockfile.parse(lockfile.render(l))
-  t.equal_str("a rendered lockfile parses", back.err, "")
+  let back = parsed(lockfile.parse(lockfile.render(l)))
   t.equal_str("the round trip is exact", lockfile.render(back), lockfile.render(l))
 }
 
@@ -58,41 +76,41 @@ fn adding_one_package_leaves_the_other_entries_untouched() {
 }
 
 fn parse_rejects_a_lockfile_from_a_newer_format_version() {
-  let l = lockfile.parse("version = 2\n")
-  t.check("a newer format version is rejected", len(l.err) > 0)
-  t.check("the error says what to do", s.contains(l.err, "upgrade spool"))
+  let l_err: Str = refusal(lockfile.parse("version = 2\n"))
+  t.check("a newer format version is rejected", len(l_err) > 0)
+  t.check("the error says what to do", s.contains(l_err, "upgrade spool"))
 }
 
 fn parse_rejects_a_file_with_no_version_key() {
   t.check("a file with no version is not a lockfile",
-    len(lockfile.parse("[[package]]\nname = \"a\"\n").err) > 0)
+    len(refusal(lockfile.parse("[[package]]\nname = \"a\"\n"))) > 0)
 }
 
 fn parse_rejects_a_package_missing_a_field() {
   let complete = "version = 1\n\n[[package]]\nname = \"a\"\nversion = \"1.0.0\"\ngit = \"g\"\n"
     + "commit = \"c\"\nhash = \"sha256:" + s.repeat("0", 64) + "\"\n"
-  t.equal_str("the complete entry parses", lockfile.parse(complete).err, "")
+  t.equal_str("the complete entry parses", refusal(lockfile.parse(complete)), "")
   t.check("an entry with no commit is rejected",
-    len(lockfile.parse("version = 1\n\n[[package]]\nname = \"a\"\nversion = \"1.0.0\"\ngit = \"g\"\n").err) > 0)
+    len(refusal(lockfile.parse("version = 1\n\n[[package]]\nname = \"a\"\nversion = \"1.0.0\"\ngit = \"g\"\n"))) > 0)
 }
 
 fn parse_rejects_a_hash_it_cannot_verify() {
-  let l = lockfile.parse("version = 1\n\n[[package]]\nname = \"a\"\nversion = \"1.0.0\"\ngit = \"g\"\n"
-    + "commit = \"c\"\nhash = \"md5:abc\"\n")
-  t.check("a digest in an unknown algorithm is rejected", len(l.err) > 0)
+  let l_err: Str = refusal(lockfile.parse("version = 1\n\n[[package]]\nname = \"a\"\nversion = \"1.0.0\"\ngit = \"g\"\n"
+    + "commit = \"c\"\nhash = \"md5:abc\"\n"))
+  t.check("a digest in an unknown algorithm is rejected", len(l_err) > 0)
 }
 
 fn parse_rejects_the_same_package_locked_twice() {
   let one = "\n[[package]]\nname = \"a\"\nversion = \"1.0.0\"\ngit = \"g\"\ncommit = \"c\"\n"
     + "hash = \"sha256:" + s.repeat("0", 64) + "\"\n"
-  t.check("two entries for one package are rejected", len(lockfile.parse("version = 1\n" + one + one).err) > 0)
+  t.check("two entries for one package are rejected", len(refusal(lockfile.parse("version = 1\n" + one + one))) > 0)
 }
 
 fn parse_rejects_unknown_keys() {
   t.check("an unknown top-level key is rejected",
-    len(lockfile.parse("version = 1\nregistry = \"https://example.com\"\n").err) > 0)
+    len(refusal(lockfile.parse("version = 1\nregistry = \"https://example.com\"\n"))) > 0)
   t.check("an unknown package key is rejected",
-    len(lockfile.parse("version = 1\n\n[[package]]\nname = \"a\"\nsource = \"x\"\n").err) > 0)
+    len(refusal(lockfile.parse("version = 1\n\n[[package]]\nname = \"a\"\nsource = \"x\"\n"))) > 0)
 }
 
 fn find_looks_up_a_package_by_name() {
@@ -102,8 +120,8 @@ fn find_looks_up_a_package_by_name() {
 }
 
 fn an_empty_lockfile_renders_and_parses() {
-  let back = lockfile.parse(lockfile.render(lockfile.empty_lock()))
-  t.equal_str("an empty lockfile parses", back.err, "")
+  let back = parsed(lockfile.parse(lockfile.render(lockfile.empty_lock())))
+  # an empty lockfile parses: parsed() aborts on failure, so reaching here is the assertion
   t.equal_i64("an empty lockfile has no packages", len(back.packages), 0)
 }
 

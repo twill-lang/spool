@@ -4,6 +4,35 @@ import "harness.tw" as t
 import "../src/strutil.tw" as s
 import "../src/manifest.tw" as manifest
 
+# `validate_name` and `validate_entry` return `Res[Unit, Str]`; this gives back
+# the message these assertions were already written against.
+fn vrefusal(r: Res[Unit, Str]) -> Str {
+  match r {
+    Err(msg) => msg,
+    Ok(_) => "",
+  }
+}
+
+
+# `manifest.parse` returns a `Res` now. `parsed` is for the cases that must succeed -- a
+# failure there is the fixture being wrong, not the property under test -- and
+# `refusal` gives the message for the cases that must be rejected, so each
+# assertion keeps saying what it said before.
+fn parsed(r: Res[manifest.Manifest, Str]) -> manifest.Manifest {
+  match r {
+    Ok(v) => v,
+    Err(msg) => abort("the test expected this to parse: " + msg),
+  }
+}
+
+fn refusal(r: Res[manifest.Manifest, Str]) -> Str {
+  match r {
+    Err(msg) => msg,
+    Ok(_) => "",
+  }
+}
+
+
 let GOOD = "# a project\n"
   + "name = \"myproject\"\n"
   + "version = \"0.3.1\"\n"
@@ -14,8 +43,9 @@ let GOOD = "# a project\n"
   + "plotting = { version = \"0.4.0\", git = \"https://example.com/plotting.git\" }\n"
 
 fn parse_reads_name_version_entry_and_dependencies() {
-  let m = manifest.parse(GOOD)
-  t.equal_str("parse reports no error on a good manifest", m.err, "")
+  # `parsed` aborts on a refusal, so reaching the next line is the assertion
+  # that a good manifest parses.
+  let m = parsed(manifest.parse(GOOD))
   t.equal_str("parse reads the name", m.name, "myproject")
   t.equal_str("parse reads the version", m.version, "0.3.1")
   t.equal_str("parse reads the entry", m.entry, "src/main.tw")
@@ -25,13 +55,13 @@ fn parse_reads_name_version_entry_and_dependencies() {
 }
 
 fn comments_are_ignored_including_trailing_ones() {
-  let m = manifest.parse("name = \"p\" # the name\nversion = \"1.0.0\"\n# trailing\n")
+  let m = parsed(manifest.parse("name = \"p\" # the name\nversion = \"1.0.0\"\n# trailing\n"))
   t.equal_str("a trailing comment does not become part of the value", m.name, "p")
 }
 
 fn a_hash_inside_a_string_is_not_a_comment() {
-  let m = manifest.parse("name = \"p\"\nversion = \"1.0.0\"\n\n[dependencies]\n"
-    + "a = { version = \"1.0.0\", git = \"https://example.com/a#frag\" }\n")
+  let m = parsed(manifest.parse("name = \"p\"\nversion = \"1.0.0\"\n\n[dependencies]\n"
+    + "a = { version = \"1.0.0\", git = \"https://example.com/a#frag\" }\n"))
   t.equal_str("a URL fragment survives comment stripping", m.deps[0].git, "https://example.com/a#frag")
 }
 
@@ -50,42 +80,50 @@ fn parse_rejects_a_manifest_missing_or_misusing_required_keys() {
   ]
   let i = 0
   while i < len(bad) {
-    t.check("parse rejects manifest " + s.i64_to_str(i), len(manifest.parse(bad[i]).err) > 0)
+    t.check("parse rejects manifest " + s.i64_to_str(i), len(refusal(manifest.parse(bad[i]))) > 0)
     i = i + 1
   }
 }
 
 fn a_dependency_without_a_git_source_is_rejected_because_there_is_no_registry() {
-  let m = manifest.parse("name = \"p\"\nversion = \"1.0.0\"\n\n[dependencies]\na = { version = \"1.0.0\" }\n")
-  t.check("a registry-style dependency is rejected", len(m.err) > 0)
-  t.check("the error explains that there is no registry", s.contains(m.err, "no registry"))
+  let m_err: Str = refusal(manifest.parse("name = \"p\"
+version = \"1.0.0\"
+
+[dependencies]
+a = { version = \"1.0.0\" }
+"))
+  t.check("a registry-style dependency is rejected", len(m_err) > 0)
+  t.check("the error explains that there is no registry", s.contains(m_err, "no registry"))
 }
 
 fn package_names_that_would_escape_the_vendor_directory_are_rejected() {
   let bad = ["../evil", "a/b", "UPPER", "with space", "", "-leading"]
   let i = 0
   while i < len(bad) {
-    t.check("validate_name rejects " + bad[i], len(manifest.validate_name(bad[i])) > 0)
+    t.check("validate_name rejects " + bad[i], len(vrefusal(manifest.validate_name(bad[i]))) > 0)
     i = i + 1
   }
   let good = ["a", "tensor-stats", "num_2"]
   let j = 0
   while j < len(good) {
-    t.equal_str("validate_name accepts " + good[j], manifest.validate_name(good[j]), "")
+    t.equal_str("validate_name accepts " + good[j], vrefusal(manifest.validate_name(good[j])), "")
     j = j + 1
   }
 }
 
 fn an_entry_using_the_superseded_dot_ra_extension_is_rejected_by_name() {
-  let m = manifest.parse("name = \"p\"\nversion = \"1.0.0\"\nentry = \"main.ra\"\n")
-  t.check("a .ra entry is rejected", len(m.err) > 0)
-  t.check("the error names the .tw extension", s.contains(m.err, ".tw"))
+  let m_err: Str = refusal(manifest.parse("name = \"p\"
+version = \"1.0.0\"
+entry = \"main.ra\"
+"))
+  t.check("a .ra entry is rejected", len(m_err) > 0)
+  t.check("the error names the .tw extension", s.contains(m_err, ".tw"))
 }
 
 fn an_entry_that_escapes_the_package_root_is_rejected() {
-  t.check("a parent-relative entry is rejected", len(manifest.validate_entry("../other/main.tw")) > 0)
-  t.check("an absolute entry is rejected", len(manifest.validate_entry("/abs/main.tw")) > 0)
-  t.equal_str("a nested entry is accepted", manifest.validate_entry("src/main.tw"), "")
+  t.check("a parent-relative entry is rejected", len(vrefusal(manifest.validate_entry("../other/main.tw"))) > 0)
+  t.check("an absolute entry is rejected", len(vrefusal(manifest.validate_entry("/abs/main.tw"))) > 0)
+  t.equal_str("a nested entry is accepted", vrefusal(manifest.validate_entry("src/main.tw")), "")
 }
 
 fn render_sorts_dependencies_and_round_trips() {
@@ -98,30 +136,27 @@ fn render_sorts_dependencies_and_round_trips() {
   }
   let out = manifest.render(m)
   t.check("render sorts dependencies", t.before(out, "alpha", "zebra"))
-  let back = manifest.parse(out)
-  t.equal_str("what render writes, parse reads", back.err, "")
+  let back = parsed(manifest.parse(out))
   t.equal_str("render is stable across a round trip", manifest.render(back), out)
 }
 
 fn add_dep_keeps_the_authors_comments() {
   let out = manifest.add_dep(GOOD, manifest.Dep { name: "extra", version: "^1.0.0", git: "https://example.com/extra" })
   t.check("add_dep keeps the comment", s.contains(out, "# a project"))
-  let m = manifest.parse(out)
-  t.equal_str("the edited manifest still parses", m.err, "")
+  let m = parsed(manifest.parse(out))
   t.equal_i64("add_dep added one dependency", len(m.deps), 3)
 }
 
 fn add_dep_creates_the_dependencies_table_when_there_is_none() {
   let out = manifest.add_dep("name = \"p\"\nversion = \"1.0.0\"\n",
     manifest.Dep { name: "a", version: "1.0.0", git: "https://example.com/a" })
-  let m = manifest.parse(out)
-  t.equal_str("a manifest with a new table parses", m.err, "")
+  let m = parsed(manifest.parse(out))
   t.equal_i64("exactly one dependency was added", len(m.deps), 1)
 }
 
 fn add_dep_replaces_an_existing_dependency_rather_than_duplicating_it() {
   let out = manifest.add_dep(GOOD, manifest.Dep { name: "plotting", version: "^9.0.0", git: "https://example.com/plotting.git" })
-  let m = manifest.parse(out)
+  let m = parsed(manifest.parse(out))
   t.equal_i64("the dependency count is unchanged", len(m.deps), 2)
   match manifest.find_dep(m, "plotting") {
     Some(at) => t.equal_str("the constraint was updated", m.deps[at].version, "^9.0.0"),
@@ -132,7 +167,7 @@ fn add_dep_replaces_an_existing_dependency_rather_than_duplicating_it() {
 fn remove_dep_reports_whether_the_dependency_was_there() {
   let out = manifest.remove_dep(GOOD, "plotting")
   t.check("remove_dep found a declared dependency", out[0] == s.B_SPACE)
-  let m = manifest.parse(out[1:len(out)])
+  let m = parsed(manifest.parse(out[1:len(out)]))
   t.equal_i64("one dependency is left", len(m.deps), 1)
   t.equal_str("the right one is left", m.deps[0].name, "tensorstats")
   t.check("remove_dep reports a dependency that is not declared", manifest.remove_dep(GOOD, "nothing")[0] != s.B_SPACE)

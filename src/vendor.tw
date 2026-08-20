@@ -202,7 +202,7 @@ fn read_manifest_at(root: Str, url: Str, version: Str) -> Str {
 # It walks the dependency graph breadth first, fetching only the repositories it
 # reaches. The resolver may then choose a version whose dependencies were not
 # fetched, which is why it is called in a loop by install below rather than once.
-fn build_catalog(root: Str, m: manifest.Manifest, cat: resolve.Catalog) -> Str {
+fn build_catalog(root: Str, m: manifest.Manifest, cat: resolve.Catalog) -> Res[Unit, Str] {
   let pending: Arr[Str] = []
   let i = 0
   while i < len(m.deps) {
@@ -225,36 +225,37 @@ fn build_catalog(root: Str, m: manifest.Manifest, cat: resolve.Catalog) -> Str {
       if not git_ok(src) {
         continue
       }
-      let sub = manifest.parse(git_out(src))
-      if len(sub.err) > 0 {
-        continue
-      }
-      cat.deps[resolve.catalog_key(url, versions[v - 1])] = git_out(src)
-      let d = 0
-      while d < len(sub.deps) {
-        push(pending, sub.deps[d].git)
-        d = d + 1
+      match manifest.parse(git_out(src)) {
+        Err(_) => continue,
+        Ok(sub) => {
+          cat.deps[resolve.catalog_key(url, versions[v - 1])] = git_out(src)
+          let d = 0
+          while d < len(sub.deps) {
+            push(pending, sub.deps[d].git)
+            d = d + 1
+          }
+        },
       }
     }
   }
-  ""
+  Ok(unit)
 }
 
 # export writes the tree at a commit into dst. It goes through `git archive`
 # rather than a checkout, so nothing from the repository's working state or its
 # .git directory can end up in the vendored copy.
-fn export(root: Str, url: Str, commit: Str, dst: Str) -> Str {
+fn export(root: Str, url: Str, commit: Str, dst: Str) -> Res[Unit, Str] {
   let c = ensure_clone(root, url)
   if not git_ok(c) {
-    return git_out(c)
+    return Err(git_out(c))
   }
   remove_all(dst)
   mkdir_all(dst)
   let r = git(git_out(c), ["--work-tree=" + dst, "checkout", "--force", commit, "--", "."])
   if not git_ok(r) {
-    return "exporting " + commit + ": " + git_out(r)
+    return Err("exporting " + commit + ": " + git_out(r))
   }
-  ""
+  Ok(unit)
 }
 
 # read_tree reads every file under dir, sorted, and hashes them. The sort is by

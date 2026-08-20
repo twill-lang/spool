@@ -10,6 +10,16 @@ import "../src/strutil.tw" as s
 import "std/hash" as sha
 import "../src/pkghash.tw" as pkghash
 
+# `pkghash.verify` returns a `Res[Unit, Str]` now; this gives back the message
+# these assertions were already written against.
+fn refusal(r: Res[Unit, Str]) -> Str {
+  match r {
+    Err(msg) => msg,
+    Ok(_) => "",
+  }
+}
+
+
 fn the_empty_string_hashes_to_the_published_vector() {
   t.equal_str("sha256 of the empty string",
     sha.hash_str(""),
@@ -99,9 +109,9 @@ fn git_metadata_is_excluded_so_the_fetch_method_does_not_change_the_hash() {
 
 fn verify_accepts_a_match_and_explains_a_mismatch() {
   let h = pkghash.hash_tree(["a.tw"], ["trusted"])
-  t.equal_str("verify accepts a matching hash", pkghash.verify("p", h, h), "")
+  t.equal_str("verify accepts a matching hash", refusal(pkghash.verify("p", h, h)), "")
   let other = pkghash.hash_tree(["a.tw"], ["tampered"])
-  let msg = pkghash.verify("p", other, h)
+  let msg = refusal(pkghash.verify("p", other, h))
   t.check("verify rejects a mismatch", len(msg) > 0)
   t.check("the mismatch shows the locked digest", s.contains(msg, h))
   t.check("the mismatch shows the fetched digest", s.contains(msg, other))

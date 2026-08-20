@@ -27,23 +27,18 @@ struct Manifest {
   # deps is kept sorted by name, so everything derived from it, above all the
   # lockfile, is independent of the order the manifest happened to list.
   deps: Arr[Dep],
-  err: Str,
-}
-
-fn error_manifest(msg: Str) -> Manifest {
-  Manifest { name: "", version: "", entry: "", deps: [], err: msg }
 }
 
 # validate_name keeps a package name to characters that are safe as a single
 # path component, because the name becomes a directory under the vendor
 # directory and part of an import path inside twill source. Rejecting the rest
 # here means nothing downstream has to defend against "..".
-fn validate_name(name: Str) -> Str {
+fn validate_name(name: Str) -> Res[Unit, Str] {
   if len(name) == 0 {
-    return "empty package name"
+    return Err("empty package name")
   }
   if len(name) > 64 {
-    return "package name " + name + " is longer than 64 characters"
+    return Err("package name " + name + " is longer than 64 characters")
   }
   let i = 0
   while i < len(name) {
@@ -54,34 +49,34 @@ fn validate_name(name: Str) -> Str {
     }
     if b == s.B_UNDER or b == s.B_MINUS {
       if i == 0 {
-        return "package name " + name + " must start with a letter or digit"
+        return Err("package name " + name + " must start with a letter or digit")
       }
       i = i + 1
       continue
     }
-    return "package name " + name + " may only contain lowercase letters, digits, `_` and `-`"
+    return Err("package name " + name + " may only contain lowercase letters, digits, `_` and `-`")
   }
-  ""
+  Ok(unit)
 }
 
 # validate_entry keeps the entry path inside the package and pointed at twill
 # source. `.ra` was the extension before the language was renamed to twill; it
 # is rejected by name so the error explains itself instead of reading as a
 # generic "not a .tw file".
-fn validate_entry(entry: Str) -> Str {
+fn validate_entry(entry: Str) -> Res[Unit, Str] {
   if s.ends_with(entry, ".ra") {
-    return "entry " + entry + " uses the old `.ra` extension; twill source is `.tw`"
+    return Err("entry " + entry + " uses the old `.ra` extension; twill source is `.tw`")
   }
   if not s.ends_with(entry, ".tw") {
-    return "entry " + entry + " must be a `.tw` file"
+    return Err("entry " + entry + " must be a `.tw` file")
   }
   if entry[0] == s.B_SLASH {
-    return "entry " + entry + " must be relative to the package root"
+    return Err("entry " + entry + " must be relative to the package root")
   }
   if s.starts_with(entry, "../") or entry == ".." {
-    return "entry " + entry + " escapes the package root"
+    return Err("entry " + entry + " escapes the package root")
   }
-  ""
+  Ok(unit)
 }
 
 fn find_dep(m: Manifest, name: Str) -> Opt[I64] {
@@ -125,13 +120,10 @@ fn sort_deps(deps: Arr[Dep]) -> Arr[Dep] {
   out
 }
 
-fn parse(src: Str) -> Manifest {
-  let doc = toml.parse(src)
-  if len(doc.err) > 0 {
-    return error_manifest(doc.err)
-  }
+fn parse(src: Str) -> Res[Manifest, Str] {
+  let doc: toml.Doc = toml.parse(src)?
 
-  let m = Manifest { name: "", version: "", entry: "", deps: [], err: "" }
+  let m = Manifest { name: "", version: "", entry: "", deps: [] }
   let i = 0
   while i < len(doc.pairs) {
     let p = doc.pairs[i]
@@ -139,7 +131,7 @@ fn parse(src: Str) -> Manifest {
 
     if p.table == "" {
       if p.is_table {
-        return error_manifest("key " + p.key + " takes a string, not a table")
+        return Err("key " + p.key + " takes a string, not a table")
       }
       if p.key == "name" {
         m.name = p.value
@@ -153,19 +145,16 @@ fn parse(src: Str) -> Manifest {
         m.entry = p.value
         continue
       }
-      return error_manifest("unknown top-level key " + p.key)
+      return Err("unknown top-level key " + p.key)
     }
 
     if p.table != "dependencies" {
-      return error_manifest("unknown table [" + p.table + "]")
+      return Err("unknown table [" + p.table + "]")
     }
     if not p.is_table {
-      return error_manifest("dependency " + p.key + " must be a table like { version = \"^1.0.0\", git = \"...\" }")
+      return Err("dependency " + p.key + " must be a table like { version = \"^1.0.0\", git = \"...\" }")
     }
-    let name_err = validate_name(p.key)
-    if len(name_err) > 0 {
-      return error_manifest(name_err)
-    }
+    validate_name(p.key)?
     let d = Dep { name: p.key, version: "", git: "" }
     let keys = dict_keys(p.fields)
     let k = 0
@@ -180,45 +169,39 @@ fn parse(src: Str) -> Manifest {
         d.git = p.fields[key]
         continue
       }
-      return error_manifest("dependency " + d.name + ": unknown key " + key)
+      return Err("dependency " + d.name + ": unknown key " + key)
     }
     if len(d.version) == 0 {
-      return error_manifest("dependency " + d.name + ": missing `version`")
+      return Err("dependency " + d.name + ": missing `version`")
     }
     let c = semver.parse_constraint(d.version)
     if not c.ok {
-      return error_manifest("dependency " + d.name + ": " + d.version + " is not a version or a `^` range")
+      return Err("dependency " + d.name + ": " + d.version + " is not a version or a `^` range")
     }
     if len(d.git) == 0 {
-      return error_manifest("dependency " + d.name + ": missing `git`; v0.1 of spool resolves git sources only, there is no registry")
+      return Err("dependency " + d.name + ": missing `git`; v0.1 of spool resolves git sources only, there is no registry")
     }
     if has_dep(m, d.name) {
-      return error_manifest("dependency " + d.name + " is declared twice")
+      return Err("dependency " + d.name + " is declared twice")
     }
     push(m.deps, d)
   }
 
   if len(m.name) == 0 {
-    return error_manifest("missing required key `name`")
+    return Err("missing required key `name`")
   }
-  let name_err = validate_name(m.name)
-  if len(name_err) > 0 {
-    return error_manifest(name_err)
-  }
+  validate_name(m.name)?
   if len(m.version) == 0 {
-    return error_manifest("missing required key `version`")
+    return Err("missing required key `version`")
   }
   if not semver.parse(m.version).ok {
-    return error_manifest("package version " + m.version + " is not major.minor.patch")
+    return Err("package version " + m.version + " is not major.minor.patch")
   }
   if len(m.entry) > 0 {
-    let entry_err = validate_entry(m.entry)
-    if len(entry_err) > 0 {
-      return error_manifest(entry_err)
-    }
+    validate_entry(m.entry)?
   }
   m.deps = sort_deps(m.deps)
-  m
+  Ok(m)
 }
 
 # render writes a manifest back out, sorted and in a fixed field order, so the

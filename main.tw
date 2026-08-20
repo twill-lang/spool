@@ -42,7 +42,15 @@ fn main() {
     push(rest, argv[i])
     i = i + 1
   }
-  let dir = cwd()
+  # `cwd()` returns a `Res[Str, Str]`, and this used to bind the Res itself and
+  # hand it to `path_join`, so every command that touches a path failed with
+  # "path_join expects strings" -- `spool init` included. Nothing caught it: the
+  # suite calls the command functions with an explicit directory and never goes
+  # through main.
+  let dir: Str = match cwd() {
+    Ok(at) => at,
+    Err(msg) => fail("cannot read the working directory: " + msg),
+  }
 
   if cmd == "help" or cmd == "--help" or cmd == "-h" {
     print(USAGE)
@@ -115,10 +123,17 @@ fn main() {
   fail("unknown command " + cmd + "\n\n" + USAGE)
 }
 
-fn check(err: Str) {
-  if len(err) > 0 {
-    fail(err)
+# Run a command and fail on its refusal. The commands return `Res[Unit, Str]`
+# now rather than a string that is empty on success, so there is no message to
+# take the length of and no way to pass one that was never checked.
+fn check(r: Res[Unit, Str]) {
+  match r {
+    Ok(_) => unit,
+    Err(msg) => fail(msg),
   }
 }
 
-main()
+# No `main()` call here on purpose. `twill run` executes a systems-mode file's
+# top level and THEN calls `main()` itself (that is what RunFileMain has done
+# since twill 1.6.1), so a file that also calls it runs the whole program
+# twice. Before 1.6.1 the call was required, which is why it was here.
