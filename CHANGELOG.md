@@ -4,9 +4,12 @@
 
 First cut of spool, the package manager for twill, written in twill.
 
-It does not run. twill's `mode systems` is still being built, and spool needs a
-process interface and file writing on top of it. See `docs/needs.md` for the
-full list and `README.md` for the status table. Nothing below has ever executed.
+It runs, on twill 1.7.1. `init`, `list` and `remove` do their whole job;
+`install` writes the lockfile and the vendor directory; `add` writes the
+dependency into `spool.toml` and then stops where it would fetch, because twill
+has no process interface and spool fetches by running `git`. That is the one
+thing still missing, and `docs/needs.md` entry 1 is the whole of it. `README.md`
+has the status table.
 
 Added:
 
@@ -21,14 +24,19 @@ Added:
 - `spool.lock` with the exact commit and content hash of every package, sorted
   by name and rendered in a fixed field order so the same resolution always
   produces the same bytes.
-- SHA-256 implemented in twill over `I64`, checked against the published test
-  vectors including the padding boundaries at 55, 56 and 64 bytes.
+- Package hashing over twill's `std/hash`, checked against the published
+  SHA-256 test vectors including the padding boundaries at 55, 56 and 64 bytes.
+  This began as `src/sha256.tw`, a SHA-256 written here in twill; it moved into
+  the standard library so the toolchain has one implementation of a digest that
+  everything must agree on byte for byte.
 - A package content hash over a length-prefixed serialisation of the file tree,
   excluding VCS metadata, and verification of it on every install.
 - Vendoring into `twill_modules/`, which is where twill's `import` can reach it.
+  Written, and blocked on a process interface for git.
 - `spool init`, `add`, `install`, `install --update`, `list`, `remove`.
-- Tests for the manifest reader, versions, the resolver, the lockfile and
-  SHA-256. They are written and have never been run; there is no test runner.
+- Six test suites, for the manifest reader, versions, the resolver, the
+  lockfile, hashing and the status lines. `twill test tests` runs them: 6
+  file(s), 6 passed, 0 failed.
 
 Deliberately not included:
 

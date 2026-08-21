@@ -158,7 +158,7 @@ fn materialise(root: Str, l: lockfile.Lock) -> Res[Unit, Str] {
     let dst = path_join(vendor_root, e.name)
 
     if pkghash.is_hash(e.hash) and path_exists(dst) {
-      let on_disk = vendor.read_tree(dst)
+      let on_disk: vendor.Fetched = vendor.read_tree(dst)?
       if on_disk.hash == e.hash {
         print(ui.up_to_date(e.name, e.version))
         continue
@@ -166,25 +166,23 @@ fn materialise(root: Str, l: lockfile.Lock) -> Res[Unit, Str] {
     }
 
     print(ui.fetching(e.name, e.version, short_commit(e.commit)))
-    let export_err = vendor.export(root, e.git, e.commit, dst)
-    if len(export_err) > 0 {
-      return Err(export_err)
-    }
-    let got = vendor.read_tree(dst)
+    vendor.export(root, e.git, e.commit, dst)?
+    let got: vendor.Fetched = vendor.read_tree(dst)?
     if not pkghash.is_hash(e.hash) {
       # First install of this commit: record what arrived. There is nothing to
       # compare against yet, and pretending otherwise would be theatre.
       l.packages[i - 1].hash = got.hash
       continue
     }
-    let bad = pkghash.verify(e.name, got.hash, e.hash)
-    if len(bad) > 0 {
-      # The bad tree is left in place. Deleting the evidence of a mismatch makes
-      # it impossible to find out what actually arrived.
-      return Err(bad + "\nthe fetched tree was left in " + dst + " for inspection")
+    # The bad tree is left in place. Deleting the evidence of a mismatch makes
+    # it impossible to find out what actually arrived.
+    match pkghash.verify(e.name, got.hash, e.hash) {
+      Ok(_) => unit,
+      Err(bad) => return Err(bad + "\nthe fetched tree was left in " + dst + " for inspection"),
     }
   }
   prune(vendor_root, l)
+  mkdir_all(vendor_root)
   write_file(path_join(vendor_root, "README"), vendor_readme())
   Ok(unit)
 }
@@ -195,7 +193,13 @@ fn prune(vendor_root: Str, l: lockfile.Lock) {
   if not path_exists(vendor_root) {
     return
   }
-  let entries = list_dir(vendor_root)
+  # `list_dir` returns a `Res[Arr[Str], Str]`. A directory that exists and
+  # cannot be read is nothing prune can do anything about, so it prunes nothing
+  # rather than aborting an install that has already vendored correctly.
+  let entries: Arr[Str] = match list_dir(vendor_root) {
+    Ok(names) => names,
+    Err(_) => return,
+  }
   let i = 0
   while i < len(entries) {
     let name = entries[i]
@@ -228,10 +232,10 @@ fn short_commit(commit: Str) -> Str {
 }
 
 fn cmd_add(dir: Str, name: Str, url: Str, requested: Str) -> Res[Unit, Str] {
-  let name_err = manifest.validate_name(name)
-  if len(name_err) > 0 {
-    return Err(name_err)
-  }
+  # `validate_name` returns a `Res[Unit, Str]`. This used to take the length of
+  # it, so `spool add` died with "len expects a tensor, list, string, dict or
+  # bytes" before it read the manifest, for every name, valid or not.
+  manifest.validate_name(name)?
   let p: Project = open(dir)?
 
   let constraint = requested
@@ -286,6 +290,13 @@ fn cmd_list(dir: Str) -> Res[Unit, Str] {
   let l: lockfile.Lock = load_lock(p.root)?
 
   print(p.manifest.name + " " + p.manifest.version)
+  # The manifest's `entry` is documentation, and this is the one place it is
+  # documentation *to* somebody: spool records it and shows it here. Every
+  # spool.toml in this ecosystem says so in a comment, and until this line
+  # existed that comment was wrong.
+  if len(p.manifest.entry) > 0 {
+    print("  entry " + p.manifest.entry)
+  }
   if len(p.manifest.deps) == 0 {
     print("  no dependencies declared")
     # An early SUCCESS: there is nothing more to list. Under the old convention
@@ -325,7 +336,10 @@ fn cmd_list(dir: Str) -> Res[Unit, Str] {
       + ui.state(install_state(p.root, e)))
   }
 
-  if len(l.packages) == 0 {
+  # Absent, not empty. A lockfile that exists and locks nothing is what a
+  # project with no installed dependency has, and telling its author there is
+  # no lockfile sends them looking for a file that is right there.
+  if not path_exists(path_join(p.root, lockfile.LOCK_NAME)) {
     print("")
     print("no " + lockfile.LOCK_NAME + " yet; run `spool install`")
   }
@@ -341,7 +355,11 @@ fn install_state(root: Str, e: lockfile.Entry) -> Str {
   if not path_exists(dst) {
     return "not installed"
   }
-  if vendor.read_tree(dst).hash != e.hash {
+  let got: vendor.Fetched = match vendor.read_tree(dst) {
+    Ok(tree) => tree,
+    Err(why) => return "unreadable: " + why,
+  }
+  if got.hash != e.hash {
     return "modified (run `spool install`)"
   }
   "ok"

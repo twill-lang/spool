@@ -14,9 +14,11 @@ struct Version {
   major: I64,
   minor: I64,
   patch: I64,
-  # ok is false when parsing failed. The subset has no Opt or Res, so a
-  # sentinel field is the only way to report failure without aborting; see
-  # docs/needs.md.
+  # ok is false when parsing failed. This predates `Opt`, which is what it
+  # would be written as today: `parse` would answer `Opt[Version]` and the
+  # field would go. It stays for now because every caller tests `.ok` and the
+  # conversion is a change to a dozen call sites rather than to this struct;
+  # `parse_triple` below already returns the `Opt`.
   ok: Bool,
 }
 

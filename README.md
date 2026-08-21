@@ -34,16 +34,57 @@ here executed and this section said so. twill 1.6 is the release that closed it:
 the 6 test suites under `tests/` pass, and CI runs them against a released
 twill on every push rather than gating on the prose in this file.
 
-```bash
-twill test tests
+```
+$ twill test tests
+ok    tests/lockfile_test.tw
+ok    tests/manifest_test.tw
+ok    tests/resolve_test.tw
+ok    tests/semver_test.tw
+ok    tests/sha256_test.tw
+ok    tests/ui_test.tw
+
+6 file(s): 6 passed, 0 failed
 ```
 
-You need twill 1.7.0 or newer. `docs/needs.md` is still worth reading -- it
-is the list of what this library asked the language for, and it now records
-which of those arrived and which are still open.
+You need twill 1.7.0 or newer. Everything shown in this file was run on twill
+1.7.1, which is what CI pins. `docs/needs.md` is still worth reading -- it is
+the list of what this library asked the language for, and it now records which
+of those arrived and which are still open.
+
+## Getting started
+
+There is nothing to build. spool is twill source, so the only thing to install
+is a twill binary:
+
+```bash
+curl -fsSL -o twill \
+  https://github.com/twill-lang/twill/releases/download/v1.7.1/twill-v1.7.1-linux-amd64
+chmod +x twill
+./twill --version
+```
+
+The v1.7.1 assets are `twill-v1.7.1-linux-amd64`, `-linux-arm64`,
+`-darwin-amd64`, `-darwin-arm64` and `-windows-amd64.exe`. Then clone this
+repository and run `main.tw`:
+
+```
+$ git clone https://github.com/twill-lang/spool
+$ cd spool
+$ twill run main.tw list
+spool 0.1.0
+  entry src/commands.tw
+  twill               -         ^1.7.0    not installed
+
+no spool.lock yet; run `spool install`
+```
+
+There is no `spool` binary yet, so every command below is spelled
+`twill run /path/to/spool/main.tw <command>` in practice. It is written `spool
+<command>` here because that is the name it will have.
 
 ## Contents
 
+- [Getting started](#getting-started)
 - [Status](#status)
 - [What spool is meant to do](#what-spool-is-meant-to-do)
 - [The manifest](#the-manifest)
@@ -56,26 +97,49 @@ which of those arrived and which are still open.
 
 ## Status
 
-The source runs and its tests pass. "Blocked" below means one thing only, and it
-is the same thing in both rows: twill has no process interface, so spool cannot
-shell out to `git`, and vendoring from a git source is the one feature that
-needs to. That is a decision about the security surface of running a `.tw` file
-rather than a missing builtin, and it is the last thing between spool and doing
-its whole job.
+The source runs and its tests pass. "Blocked" below means one thing only:
+twill 1.7.1 has no process interface, so spool cannot shell out to `git`, and
+vendoring from a git source is the one feature that needs to. That is verified
+rather than assumed: there is no `run`, `exec` or `spawn` among the builtins
+twill 1.7.1 defines, and `src/vendor.tw` calls `run`, so the moment a command
+reaches git it dies with `undefined variable "run"`. It is a decision about the
+security surface of running a `.tw` file rather than a missing builtin, and it
+is the last thing between spool and doing its whole job.
 
 | Piece | State |
 | --- | --- |
-| `spool.toml` reader, a hand-rolled TOML subset | runs, tested |
-| Version parsing and `^` constraints | runs, tested |
-| Dependency resolver, pure and network-free | runs, tested |
-| `spool.lock` writer and reader, deterministic | runs, tested |
-| SHA-256, in twill, verified against published vectors | moved to `std/hash` |
-| Package content hashing and verification | runs, tested |
-| Vendoring into `twill_modules/` | blocked: needs a process interface for git |
-| `add` / `install` / `list` / `remove` | run, except where they vendor |
-| Tests | 6 suites, run by CI on every push |
+| `spool.toml` reader, a hand-rolled TOML subset | runs, tested by `tests/manifest_test.tw`; it reads all nine manifests in this ecosystem |
+| Version parsing and `^` constraints | runs, tested by `tests/semver_test.tw` |
+| Dependency resolver, pure and network-free | runs, tested by `tests/resolve_test.tw` |
+| `spool.lock` writer and reader, deterministic | runs, tested by `tests/lockfile_test.tw` |
+| SHA-256, in twill, verified against published vectors | moved to `std/hash`; `tests/sha256_test.tw` still checks it against the vectors |
+| Package content hashing and verification | runs, tested by `tests/sha256_test.tw` |
+| Vendoring into `twill_modules/` | blocked: needs a process interface for git, which twill 1.7.1 does not have |
+| `init` / `list` / `remove` | run; they touch no network |
+| `add` | writes the dependency into `spool.toml`, then stops where it would fetch |
+| `install` | writes `spool.lock` and the vendor directory; stops where it would fetch a declared git dependency |
+| Tests | 6 suites, 6 passed, run by CI on every push |
 | A registry | not planned for v0.1. Git sources only |
 | Publishing packages | not in scope. spool consumes, it does not publish |
+
+What that looks like, in a directory with no `spool.toml` in it:
+
+```
+$ twill run main.tw init demo
+wrote spool.toml
+$ twill run main.tw list
+demo 0.1.0
+  entry demo.tw
+  no dependencies declared
+$ twill run main.tw install
+packages are in twill_modules/
+$ twill run main.tw add tensorstats https://github.com/example/tensorstats 1.2.0
+       added  tensorstats 1.2.0
+runtime error: undefined variable "run"
+```
+
+`add` edits the manifest before it fetches, so the dependency is declared and
+the exit code is 1. That is the boundary, and it is one builtin wide.
 
 CI runs the suites against a released twill. It also still gates the things that
 are true of the repository whatever the compiler does -- that every source file
@@ -127,13 +191,26 @@ are **rejected**, not ignored. Quietly widening a constraint someone wrote
 narrowly is a worse failure than refusing to read it.
 
 `entry` is documentation. twill has no notion of a package entry point, so spool
-records it and shows it in `spool list`; it does not enforce it.
+records it and prints it as the second line of `spool list`; it does not enforce
+it.
+
+`entry` is also checked: it must end in `.tw`, and it must be relative to the
+package root. `.ra`, the extension twill used under its old name, is rejected by
+name so the message explains itself.
 
 `spool.toml` is read by a hand-rolled parser covering comments, one-level
-`[table]` headers, quoted strings, and single-line inline tables. That is the
-whole subset. It is not TOML. It is a file that both a TOML parser and this
-reader will accept, and only inside that subset do the two agree. Escape
-sequences are not interpreted, so a Windows-style path reads back byte for byte.
+`[table]` headers, basic (`"..."`) and literal (`'...'`) strings, and
+single-line inline tables. That is the whole subset. It is not TOML. It is a
+file that both a TOML parser and this reader will accept, and only inside that
+subset do the two agree.
+
+Escape sequences are not interpreted, and the reader **rejects** a backslash
+inside a basic string rather than guessing what it meant: `entry =
+"src\dir\main.tw"` is `line 3: expected a quoted string for entry`. Write a
+Windows-style path in a literal string, `entry = 'src\dir\main.tw'`, and it
+reads back byte for byte. Refusing is the point, because a real TOML parser
+would read those two bytes as an escape and the two readers would disagree
+about the value.
 
 ## The lockfile
 
@@ -189,6 +266,11 @@ myproject/
 spool add tensorstats https://github.com/example/tensorstats
 ```
 
+This is the one step that does not work on twill 1.7.1. `add` writes the
+dependency into `spool.toml` and then stops at git, so the rest of this section
+describes the tree spool produces once there is a process interface, not one it
+can produce today.
+
 **2. Gitignore the vendor directory, commit the two spool files.**
 
 ```
@@ -233,12 +315,12 @@ src/toml.tw          the spool.toml reader
 src/semver.tw        versions and `^` constraints
 src/manifest.tw      spool.toml model, parse, render, add/remove a dependency
 src/resolve.tw       the resolver: pure, no IO, testable from a literal table
-src/sha256.tw        SHA-256 over I64
-src/pkghash.tw       the package content hash and its verification
+src/pkghash.tw       the package content hash and its verification, over std/hash
 src/lockfile.tw      spool.lock render and parse
 src/vendor.tw        git, the filesystem, and nothing else in spool touches them
 src/commands.tw      add, install, list, remove, init
-tests/               tests, named as sentences
+src/ui.tw            the colour and the gutter on spool's status lines
+tests/               six suites, named as sentences
 docs/needs.md        what the language still has to provide
 ```
 
@@ -250,9 +332,19 @@ that reaches outside the process.
 ## Dependencies
 
 None. Not "few". None. No third-party twill packages, no Go, no shell scripts
-doing the real work, no vendored anything. SHA-256 is implemented in this
-repository in twill for exactly that reason, and it is slower than a builtin
-would be. That cost is written down in `src/sha256.tw` rather than hidden.
+doing the real work, no vendored anything.
+
+SHA-256 used to be in this repository, in twill, for exactly that reason. It is
+now twill's `std/hash`, which is the same argument arriving at the right place:
+a digest the whole toolchain has to agree on byte for byte should have one
+implementation, and the standard library is not a third-party dependency.
+`src/pkghash.tw` is what remains here, and it is the part that is spool's:
+the canonical serialisation of a file tree that gets hashed.
+
+`spool.toml` in this repository declares `twill` as a dependency. That is the
+language itself, declared the way every sibling repository declares it, because
+spool has no notion of a toolchain dependency and a version that matters should
+be written down somewhere a tool can read.
 
 ## Contributing
 

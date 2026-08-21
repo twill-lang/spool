@@ -83,10 +83,10 @@ jobs:
       # would have. Pinned rather than floating: a green run should mean this
       # code passed against a known compiler, not against whatever was newest
       # that morning.
-      - name: Install twill v1.7.0
+      - name: Install twill v1.7.1
         run: |
           curl -fsSL -o twill \
-            https://github.com/twill-lang/twill/releases/download/v1.7.0/twill-v1.7.0-linux-amd64
+            https://github.com/twill-lang/twill/releases/download/v1.7.1/twill-v1.7.1-linux-amd64
           chmod +x twill
           ./twill --version
 
@@ -122,8 +122,9 @@ jobs:
       # the Res they return and handed to functions expecting a Str, and the
       # file called main() itself so the whole program ran twice.
       #
-      # init and list are the two commands that need no network. Anything that
-      # vendors needs git and a remote, and is left out.
+      # init, list, install and remove are the commands that need no network in
+      # a project with no git-backed dependency. Anything that actually vendors
+      # needs git and a remote, and is left out.
       - name: Smoke the CLI
         run: |
           bin="$PWD/twill"
@@ -133,4 +134,15 @@ jobs:
           "$bin" run "$main" init demo
           test -f spool.toml
           "$bin" run "$main" list
+          "$bin" run "$main" install
+          # install writes both of these, and it silently wrote neither for as
+          # long as the vendor directory was never created.
+          test -f spool.lock
+          test -f twill_modules/README
+          "$bin" run "$main" version
           "$bin" run "$main" help > /dev/null
+          # spool reads its own manifest, which is the format this repository
+          # exists to read. A parse failure here is spool failing to eat its
+          # own output.
+          cd "$OLDPWD"
+          "$bin" run main.tw list

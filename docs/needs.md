@@ -1,15 +1,24 @@
 # What spool needs from twill
 
-spool is written in twill and does not run yet. This file is the reason: it is
+spool is written in twill and runs. This file was the reason it did not: it is
 the list of language and runtime features the source uses that `mode systems`
-does not provide today, with the file that needs each one and what spool does
-in the meantime.
+did not provide, with the file that needs each one and what spool did in the
+meantime.
 
-It is meant to be read as a work queue for the language, not as a complaint.
+Most of it is now a record rather than a queue. Of the fourteen entries below,
+thirteen are delivered as of twill 1.7.1, which is the release `spool.toml` and
+CI pin. **One is still open, and it is entry 1: there is no process interface.**
+That is verified rather than assumed: no builtin in twill 1.7.1 starts a
+subprocess, `src/vendor.tw` calls `run`, and any command that reaches git dies
+with `undefined variable "run"`. Vendoring from a git source is the one spool
+feature that waits on it.
+
+It was meant to be read as a work queue for the language, not as a complaint.
 Every entry was reached by writing real code and hitting the wall, which is the
-only way this list is worth anything. Where spool has a workaround, the
-workaround is described, because the ugliness of a workaround is information
-about how badly the feature is wanted.
+only way this list is worth anything. Each entry keeps what it said while it was
+open, because the ugliness of a workaround is information about how badly the
+feature was wanted, and because a queue that deletes its delivered items leaves
+no record of whether asking worked.
 
 The baseline is milestone 1 of `docs/self-hosting.md` in the twill repository:
 `mode systems`, `I64` with bitwise operations and defined wrapping, `Str` with
@@ -17,13 +26,19 @@ length, byte indexing and slicing, `Arr[T]`, `Dict[Str, V]` with
 insertion-ordered iteration, `struct`, and `read_file`. Everything spool uses
 beyond that is below.
 
-## Blocking: spool cannot work at all without these
+## Was blocking: spool could not work at all without these
+
+Entry 1 still is.
 
 ### 1. A process interface
 
-**Needs:** `run(program: Str, argv: Arr[Str], dir: Str) -> Str`
+**Needs:** `run(program: Str, argv: Arr[Str], dir: Str) -> Res[Str, Str]`
 **Used by:** `src/vendor.tw`
-**Status:** not in the systems subset at any milestone.
+**Status:** **still open on twill 1.7.1.** The only entry here that is.
+
+The `Res` in the signature is the one change since this was written. The
+`"!"`-flag encoding entry 10 describes is gone everywhere else in spool, and a
+process interface should not be the last place it survives.
 
 This is the largest gap and it is not a small one. spool fetches packages by
 running `git clone`, `git fetch`, `git tag`, `git rev-list`, `git show` and
@@ -45,17 +60,37 @@ rather than a side effect of wanting a package manager.
 
 **Needs:** `write_file(path: Str, contents: Str) -> Str`
 **Used by:** `src/commands.tw` (the lockfile, the manifest, the vendor README)
-**Status:** listed in section 1.2 of the self-hosting design, not in milestone 1.
+**Status:** **done** (twill 1.7). `write_file(path, contents) -> Res[Unit, Str]`.
 
-A package manager that cannot write a lockfile is a linter. This one is already
-designed and only needs landing.
+A package manager that cannot write a lockfile is a linter. `spool init` and
+`spool install` both write files now: `twill run main.tw install` in an empty
+project produces a `spool.lock` and a `twill_modules/README`.
+
+twill also grew `write_text_or(path, contents) -> Bool` and
+`read_text_or(path, fallback) -> Str` for the caller who has already decided
+what a failure means. spool does not use either. Every write it makes is one a
+user asked for, and a write that silently did not happen is the failure mode a
+package manager can least afford.
 
 ### 3. Directory operations
 
 **Needs:** `list_dir(path) -> Arr[Str]`, `is_dir(path) -> Bool`,
 `path_exists(path) -> Bool`, `mkdir_all(path)`, `remove_all(path)`
 **Used by:** `src/vendor.tw`, `src/commands.tw`
-**Status:** `list_dir` is mentioned in passing in section 1.2; the rest are not.
+**Status:** **done** (twill 1.7), with two spellings to note.
+
+`is_dir` is `path_is_dir`. `list_dir` answers `Res[Arr[Str], Str]` rather than a
+bare `Arr[Str]`, which is the right answer and is also a trap: `src/vendor.tw`
+and `src/commands.tw` both indexed the `Res` directly, so `walk` and `prune`
+were broken in the way entry 10 describes. Both are fixed.
+
+twill 1.7.1 delivers more than this entry asked for: `remove_file`,
+`remove_dir`, `rename`, `temp_dir`, `file_size`, `mtime`, `read_file_at`, and
+the `path_join` / `path_base` / `path_dir` / `path_ext` / `path_stem` /
+`path_normalize` / `path_is_abs` family. `path_join` emitting a forward slash on
+every platform is what deleted spool's hand-rolled `join_path`, and it is what
+`read_tree` depends on for a package hash that is the same on Windows and on
+Linux.
 
 The content hash covers every file in a vendored package, so spool has to be
 able to enumerate one. `remove_all` is needed because a package that fails
@@ -72,87 +107,86 @@ on filesystem order.
 **Needs:** `args() -> Arr[Str]`, `cwd() -> Str`, `write_err(Str)`, `exit(I64)`,
 and `print` accepting a `Str`
 **Used by:** `main.tw`
-**Status:** `args`, `write_err` and `exit` are in section 1.2; `cwd` is not.
+**Status:** **done** (twill 1.7). All five, plus `env`.
 
-`cwd` is the one addition. spool resolves the project root by walking up from
-the working directory, the way git does, and cannot start without knowing where
-it is.
+`cwd` was the one addition and it landed as `Res[Str, Str]`. `main.tw` bound the
+`Res` itself for a while and handed it to `path_join`, so every command failed
+before doing anything; that is bug 1 in entry 10.
 
-## Blocking: the language features the source assumes
+## Was blocking: the language features the source assumes
+
+All four delivered.
 
 ### 5. `Str` concatenation with `+`
 
 **Used by:** every file.
-**Status:** unspecified.
+**Status:** **done** (twill 1.7). `+` concatenates in systems mode, and the
+whole suite passing is the demonstration.
 
-`docs/self-hosting.md` gives `Bytes` a `concat` and says `Str` is convertible to
-and from `Bytes` by copy, but does not say how two `Str` values are joined.
-spool assumes `+` concatenates in systems mode. Every string this program builds
-(the lockfile, error messages, hex digests) goes through it.
+The related ask is delivered too, under another name: `chr(b)` returns the
+one-byte `Str` for a byte value, so `str_from_byte` is not needed. The `HEX`
+table in `src/strutil.tw` stays anyway, because what it does is a
+nibble-to-digit lookup rather than a byte-to-string conversion, and `HEX[n]` is
+clearer than `chr` plus a branch on whether the nibble is a digit or a letter.
 
-If `+` is not the answer, `str_concat(a, b)` would do, but the answer needs to
-be written down; this is the single most-used operation in the source.
-
-Related and smaller: there is no way to turn a byte value back into a one-byte
-`Str`. `src/strutil.tw` works around it with a sixteen-entry `HEX` table indexed
-by nibble, which is fine for hex and would not be fine for anything else. A
-`str_from_byte(b: I64) -> Str` would delete that table.
+Where `+` is the wrong tool it is now avoidable: `src/lockfile.tw` and
+`src/pkghash.tw` build into a `Bytes` with `std/text`'s `push_str`, because both
+concatenate in a loop over a whole dependency tree and `+` there is quadratic in
+the size of the output.
 
 ### 6. The spelling of the I64 bitwise operators
 
-**Used by:** `src/sha256.tw`, `src/strutil.tw`
-**Status:** named but not specified.
+**Used by:** `src/strutil.tw`
+**Status:** **done** (twill 1.7), and the question this entry asked is the one
+the answer turned on.
 
-Section 1.2 lists "bitwise `and or xor shl shr not` on I64" without saying
-whether these are infix operators, builtin functions, or how they bind against
-the arithmetic and comparison operators. spool assumes infix with
-`not` prefix, and `src/sha256.tw` parenthesises every subexpression rather than
-relying on a precedence that has not been decided.
+They are different operators with different names. `docs/language-guide.md` in
+the twill repository spells the bitwise ones `band`, `bor`, `xor`, `shl`, `shr`,
+usable infix or as calls, with `bnot(a)` for the complement. `and` and `or` stay
+boolean. `src/strutil.tw` writes `band` today, which is the whole of what spool
+needed from this.
 
-`and` and `or` are also the obvious spellings for boolean conjunction, which
-spool uses throughout. If they are the same operators overloaded on `Bool` and
-`I64`, that should be stated; if they are different, one pair needs another
-name.
+`src/sha256.tw` is gone, so the file that would have exercised these hardest is
+no longer here; see entry 13.
 
 ### 7. `Bool` as a declared type
 
 **Used by:** every file.
-**Status:** not named in the subset.
-
-Section 1.2 names `I64`, `Byte`, `Bytes`, `Str`, `Arr`, `Dict`, `Opt` and `Res`
-as the type names, and section 1.3 makes annotation mandatory in systems mode,
-but `Bool` is never listed even though comparisons obviously produce one. spool
-writes `-> Bool` in a dozen places. This is probably an oversight in the
-document rather than a missing feature.
+**Status:** **done** (twill 1.7). It was an oversight in the document rather
+than a missing feature, as this entry guessed. `-> Bool` checks and runs, in the
+dozen places spool writes it.
 
 ### 8. `continue` in loops
 
 **Used by:** `src/toml.tw`, `src/manifest.tw`, `src/lockfile.tw`,
 `src/resolve.tw`, `src/commands.tw`
-**Status:** `docs/language-guide.md` documents `return` but neither `break` nor
-`continue`.
+**Status:** **done** (twill 1.7). `continue` works, including inside a `match`
+arm, which is what `src/vendor.tw`'s catalog walk needs.
 
 The parsers are written as a loop over lines with an early `continue` per line
 shape. Without it every parser here grows a level of nesting per case, which is
 exactly the readability the self-hosting document is trying to buy.
 
-## Not blocking, but the source is worse without them
+## Not blocking, but the source was worse without them
+
+All six delivered, two of them only in the language: entries 9 and 11 are refactors this repository has
+not done yet.
 
 ### 9. Sum types and `match`
 
 **Would improve:** `src/toml.tw`, `src/semver.tw`, `src/manifest.tw`
-**Status:** designed in section 1.2, explicitly excluded from milestone 1.
+**Status:** **done in the language** (twill 1.7), half taken up in spool.
 
-Milestone 1 says a token kind can be an `I64` constant for now and that the
-ugliness of that is itself information. Here is the information, from a program
-that is not a compiler.
+`src/semver.tw` is converted. `enum ConstraintKind { Exact(Version),
+Caret(Version), Any }` replaced the `I64` tag beside a `base` that meant nothing
+in the `Any` case, and `matches` is an exhaustive `match` rather than a chain of
+`if`s with a fall-through into the caret arm.
 
-`src/toml.tw` has a `Pair` struct with both a `value: Str` and a
-`fields: Dict[Str, Str]`, plus an `is_table: Bool` saying which one is real.
-That is a two-case sum written out by hand, and nothing stops a caller reading
-the wrong field. `src/semver.tw` has a `Constraint` with an `I64` `kind` and a
-`base` that is meaningless when the kind is "any". Both would be four lines of
-`enum` and a `match` that the checker would make exhaustive.
+`src/toml.tw`'s `Pair` is not converted. It still carries a `value: Str`, a
+`fields: Dict[Str, Str]` and an `is_table: Bool` saying which one is real, which
+is a two-case sum written out by hand with nothing stopping a caller from
+reading the wrong field. That is a refactor this repository owes itself rather
+than something the language withholds.
 
 ### 10. `Res[T, E]`, `Opt[T]`, and returning two values
 
@@ -160,18 +194,18 @@ the wrong field. `src/semver.tw` has a `Constraint` with an `I64` `kind` and a
 **Status:** done, both halves (2026-08, on twill 1.7). Neither convention
 survives anywhere in spool.
 
-**Done.** `Doc`, `Manifest`, `Lock`, `Resolution` and `Project` have lost their
-`err` fields, and every function that returned a `Str` that was empty on
+**Done.** `Doc`, `Manifest`, `Lock`, `Resolution`, `Project` and `vendor.Fetched`
+have lost their `err` fields, and every function that returned a `Str` that was empty on
 success returns a `Res` instead: `toml.parse`, `manifest.parse`,
 `validate_name`, `validate_entry`, `lockfile.parse`, `resolve.resolve`,
 `catalog_deps`, `pkghash.verify`, `commands.open`, `load_lock`,
-`lock_satisfies`, `materialise`, all five `cmd_*`, and `vendor.build_catalog`
-and `export`. `main.check` takes the `Res`, so there is no message to take the
+`lock_satisfies`, `materialise`, all five `cmd_*`, and `vendor.build_catalog`,
+`export` and `read_tree`. `main.check` takes the `Res`, so there is no message to take the
 length of and no way to pass one that was never read.
 
-**Three bugs this found, none of which the tests could see**, because the suite
+**Seven bugs this found, none of which the tests could see**, because the suite
 calls the command functions with fixture strings and never goes through `main`
-or touches a file:
+or touches a file. Three came out of the conversion itself:
 
 1. `main` bound `cwd()` -- a `Res[Str, Str]` -- and handed it to `path_join`, so
    every command died with "path_join expects strings" before doing anything.
@@ -183,6 +217,25 @@ or touches a file:
    file's top level and *then* calls `main()` itself, which it has done since
    twill 1.6.1, so the whole program ran twice: `spool init` wrote the manifest
    and then reported that it already existed, and exited 1.
+
+Four more were the same mistake made against builtins that had gained a `Res`
+rather than against spool's own functions, and they survived the first pass. A
+second reading of every call site found them:
+
+4. `cmd_add` took the length of `validate_name`'s `Res[Unit, Str]`, so `spool
+   add` died with "len expects a tensor, list, string, dict or bytes" for every
+   name, valid or not, after printing `added`.
+5. `materialise` did the same to `vendor.export` and to `pkghash.verify`, so a
+   failed export and a failed integrity check would both have been read as
+   success.
+6. `vendor.read_tree` pushed `read_file`'s `Res` straight into the array of file
+   contents it hashes. An unreadable file would have gone into the package hash
+   as a `Res` value rather than being reported.
+7. `vendor.walk` and `commands.prune` indexed `list_dir`'s `Res` as an array.
+
+All seven are the same shape: a value that says whether it worked, used as
+though it could not have failed. The pattern that catches them is not a test, it
+is `?` and `match` at the boundary, which is what this entry asked for.
 
 **The `"!"`-flag convention is gone too**, which this entry rightly called the
 worse of the two: a `Str` whose first byte said whether the rest was a value or
@@ -222,49 +275,57 @@ generic two-field struct. The subset has no generics over user structs, so
 ### 11. `Dict` values that are not scalars
 
 **Would improve:** `src/resolve.tw`
-**Status:** milestone 1 gives `Dict[Str, V]`; whether `V` may be a struct or an
-`Arr` is not stated.
+**Status:** **done** (twill 1.7). It was the documentation request. `V` may be
+any type: `Dict[Str, Arr[Str]]` and a `Dict` whose values are structs both check
+and run.
 
-`resolve.Catalog` holds `Dict[Str, Str]` where the values are
+`resolve.Catalog` still holds `Dict[Str, Str]` where the values are
 **comma-separated version lists** and **whole rendered manifests**, re-parsed on
-every read. It wants `Dict[Str, Arr[Version]]` and `Dict[Str, Manifest]`. If `V`
-may already be any type, this entry is just a documentation request; if it may
-not, this is the strongest argument in spool for lifting the restriction.
+every read. It wants `Dict[Str, Arr[Version]]` and `Dict[Str, Manifest]`, and
+nothing is stopping it any more. Like entry 9, this is a refactor spool owes
+itself.
 
 ### 12. A sort, or a comparison-function parameter
 
 **Would improve:** `src/strutil.tw`, `src/manifest.tw`, `src/lockfile.tw`,
 `src/resolve.tw`
-**Status:** no generic sort; functions are values in numeric twill, but whether
-a function may be passed to a systems-mode function is not stated.
+**Status:** **half delivered** (twill 1.7). The half that was a language
+question is answered: a function may be passed to a systems-mode function, with
+a `fn(Str, Str) -> Bool` parameter type, and it checks and runs.
 
-There are four near-identical insertion sorts in this source, one per element
-type, differing only in the comparison. They are correct and small, and having
-four of them is still four times as many places for the ordering that the
-lockfile depends on to go wrong.
+There is still no generic sort builtin, and there are still four near-identical
+insertion sorts in this source, one per element type, differing only in the
+comparison. They are correct and small, and having four of them is still four
+times as many places for the ordering that the lockfile depends on to go wrong.
+A comparison-taking sort can be written in twill now. Nobody has written it.
 
 ### 13. A `sha256` builtin
 
 **Would improve:** `src/sha256.tw`
-**Status:** not planned, and correctly so.
+**Status:** **done** (twill 1.7), and this entry argued against it.
 
-`src/sha256.tw` is a full SHA-256 in twill, over `I64` with explicit 32-bit
-masking. It is written that way on purpose: a package manager that does not
-verify what it fetched is a supply-chain hole, and a non-cryptographic hash
-would detect corruption but not substitution, and substitution is the threat.
+The argument was that a hash spool needs is spool's to own: a package manager
+that does not verify what it fetched is a supply-chain hole, a non-cryptographic
+hash would detect corruption but not substitution, and substitution is the
+threat.
 
-It will be slow, because it runs the compression function in the interpreter one
-32-bit word at a time. For a handful of small `.tw` files at install time that
-is acceptable. It would not be acceptable for large artifacts, and if spool ever
-grows those, this is the first thing that should become a builtin.
+What settled it the other way is that a digest the whole toolchain has to agree
+on byte for byte should have one implementation and not one per repository.
+`warp` wanted the same function for cache keys, and two transcriptions of
+SHA-256 that must agree is the worse risk.
 
-It is also a good benchmark for the systems subset: it is pure `I64` and `Str`
-work with no IO, so it exercises exactly the part of the subset that milestone 1
-delivers, and it is verifiable against published test vectors.
+It is `std/hash` now. `src/sha256.tw` is deleted, `src/pkghash.tw` calls
+`sha.hash_str`, and `tests/sha256_test.tw` still checks the published vectors,
+including the padding boundaries at 55, 56 and 64 bytes, through `std/hash`. The
+part that stayed here is the part that is actually spool's: the canonical,
+length-prefixed serialisation of a file tree in `src/pkghash.tw`.
 
 ### 14. Mandatory-typing policy questions the source ran into
 
-**Status:** open questions rather than requests.
+**Status:** **answered** (twill 1.7). All four assumptions below were the right
+ones, and the demonstration is that this source checks and its suites pass. They
+are left written down because they are the questions the next program written in
+this subset will ask.
 
 - Are `Arr` and `Dict` literals (`[]`, `{}`) inferred from the annotation on the
   binding? spool writes `let out: Arr[Str] = []` and assumes yes. The `{}`
