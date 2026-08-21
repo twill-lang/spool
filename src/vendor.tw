@@ -34,7 +34,6 @@ struct Fetched {
   paths: Arr[Str],
   contents: Arr[Str],
   hash: Str,
-  err: Str,
 }
 
 # join_path is gone. It was a hand-rolled path_join, written when the language
@@ -249,8 +248,13 @@ fn export(root: Str, url: Str, commit: Str, dst: Str) -> Res[Unit, Str] {
 # read_tree reads every file under dir, sorted, and hashes them. The sort is by
 # byte on a `/`-separated path, so the hash does not depend on the order the
 # filesystem happened to hand back or on the host's path separator.
-fn read_tree(dir: Str) -> Fetched {
-  let found = list_dir_recursive(dir)
+#
+# It returns a `Res` rather than a `Fetched` with an `err` field, and every
+# `read_file` inside it is unwrapped. It used to push the `Res` itself into
+# `contents`, so a file that could not be read went into the package hash as a
+# `Res` value: the hash would have been wrong rather than the read reported.
+fn read_tree(dir: Str) -> Res[Fetched, Str] {
+  let found: Arr[Str] = list_dir_recursive(dir)?
   let kept: Arr[Str] = []
   let i = 0
   while i < len(found) {
@@ -263,25 +267,34 @@ fn read_tree(dir: Str) -> Fetched {
   let contents: Arr[Str] = []
   let j = 0
   while j < len(paths) {
-    let body = read_file(path_join(dir, paths[j]))
+    let body: Str = match read_file(path_join(dir, paths[j])) {
+      Ok(text) => text,
+      Err(why) => return Err("reading " + paths[j] + " in " + dir + ": " + why),
+    }
     push(contents, body)
     j = j + 1
   }
-  Fetched { paths: paths, contents: contents, hash: pkghash.hash_tree(paths, contents), err: "" }
+  Ok(Fetched { paths: paths, contents: contents, hash: pkghash.hash_tree(paths, contents) })
 }
 
 # list_dir_recursive returns every regular file under dir as a `/`-separated
 # path relative to dir. Symlinks are not followed: a vendored twill package is
 # source files, and following one would let a package's hash cover, or fail to
 # cover, something outside the tree.
-fn list_dir_recursive(dir: Str) -> Arr[Str] {
+fn list_dir_recursive(dir: Str) -> Res[Arr[Str], Str] {
   let out: Arr[Str] = []
-  walk(dir, "", out)
-  out
+  walk(dir, "", out)?
+  Ok(out)
 }
 
-fn walk(base: Str, prefix: Str, out: Arr[Str]) {
-  let entries = list_dir(path_join(base, prefix))
+# `list_dir` returns a `Res[Arr[Str], Str]`, and this used to index it directly.
+# A directory spool cannot read is reported, because the alternative is a
+# package hash taken over the files that happened to be readable.
+fn walk(base: Str, prefix: Str, out: Arr[Str]) -> Res[Unit, Str] {
+  let entries: Arr[Str] = match list_dir(path_join(base, prefix)) {
+    Ok(names) => names,
+    Err(why) => return Err("listing " + path_join(base, prefix) + ": " + why),
+  }
   let i = 0
   while i < len(entries) {
     let name = entries[i]
@@ -293,9 +306,10 @@ fn walk(base: Str, prefix: Str, out: Arr[Str]) {
     # wants, so the empty-prefix case needs no special handling here.
     let rel = path_join(prefix, name)
     if path_is_dir(path_join(base, rel)) {
-      walk(base, rel, out)
+      walk(base, rel, out)?
     } else {
       push(out, rel)
     }
   }
+  Ok(unit)
 }

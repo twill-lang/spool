@@ -22,8 +22,10 @@ mode systems
 import "strutil.tw" as s
 
 # Pair is one key and its value, with `fields` holding an inline table's
-# contents when `is_table` is set. A subset with no sum types has no better way
-# to say "one of two shapes"; see docs/needs.md.
+# contents when `is_table` is set. That is a two-case sum written out by hand,
+# from when the subset had no better way to say "one of two shapes". twill has
+# `enum` and `match` now, and src/semver.tw uses them; this is the one place in
+# spool that still does it the old way. See docs/needs.md entry 9.
 struct Pair {
   table: Str,
   key: Str,

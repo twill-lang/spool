@@ -17,9 +17,10 @@ import "manifest.tw" as manifest
 #
 # `versions` maps a git URL to a comma-separated list of published versions, and
 # `deps` maps "url@version" to the rendered [dependencies] table of that
-# package's own spool.toml. Both are strings because the subset has no nested
-# containers beyond Dict[Str, V]; see docs/needs.md, this type is the clearest
-# evidence for wanting Dict values that are not scalars.
+# package's own spool.toml. Both are strings because the subset had no nested
+# containers beyond Dict[Str, V] when this was written. It does now: a Dict may
+# hold an Arr or a struct, so this wants to be Dict[Str, Arr[Version]] and
+# Dict[Str, Manifest] and nothing is stopping it. See docs/needs.md entry 11.
 struct Catalog {
   versions: Dict[Str, Str],
   deps: Dict[Str, Str],

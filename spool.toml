@@ -3,8 +3,9 @@
 #
 # spool describes its own package the way it describes everyone else's: a package
 # manager that could not vendor itself would be asking the ecosystem to trust a
-# format it does not eat. This file is that dogfooding, and `spool resolve` run
-# in this repository reads it.
+# format it does not eat. This file is that dogfooding, and `spool list` run in
+# this repository reads it. There is no `spool resolve` command; the resolver is
+# a library that `install` calls.
 name = "spool"
 version = "0.1.0"
 
@@ -17,4 +18,4 @@ entry = "src/commands.tw"
 # this source was written against. spool has no notion of a toolchain dependency,
 # so it is declared as an ordinary git dependency, the same way every other
 # package in the ecosystem declares it.
-twill = { version = "^1.5.0", git = "https://github.com/twill-lang/twill" }
+twill = { version = "^1.7.0", git = "https://github.com/twill-lang/twill" }
