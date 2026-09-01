@@ -243,7 +243,7 @@ fn cmd_add(dir: Str, name: Str, url: Str, requested: Str) -> Res[Unit, Str] {
     # With no version given, pin to the highest published version with a caret.
     # Defaulting to "*" would be less code and would silently opt the project
     # into the next major release of a dependency.
-    let versions = vendor.published_versions(p.root, url)
+    let versions: Arr[Str] = vendor.published_versions(p.root, url)?
     if len(versions) == 0 {
       return Err(url + " publishes no version tags that spool can read; pass a version explicitly")
     }

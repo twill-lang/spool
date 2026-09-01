@@ -47,7 +47,7 @@ ok    tests/ui_test.tw
 ```
 
 You need twill 1.7.0 or newer. Everything shown in this file was run on twill
-1.7.1, which is what CI pins. `docs/needs.md` is still worth reading -- it is
+1.8.0, which is what CI pins. `docs/needs.md` is still worth reading -- it is
 the list of what this library asked the language for, and it now records which
 of those arrived and which are still open.
 
@@ -58,12 +58,12 @@ is a twill binary:
 
 ```bash
 curl -fsSL -o twill \
-  https://github.com/twill-lang/twill/releases/download/v1.7.1/twill-v1.7.1-linux-amd64
+  https://github.com/twill-lang/twill/releases/download/v1.8.0/twill-v1.8.0-linux-amd64
 chmod +x twill
 ./twill --version
 ```
 
-The v1.7.1 assets are `twill-v1.7.1-linux-amd64`, `-linux-arm64`,
+The v1.8.0 assets are `twill-v1.8.0-linux-amd64`, `-linux-arm64`,
 `-darwin-amd64`, `-darwin-arm64` and `-windows-amd64.exe`. Then clone this
 repository and run `main.tw`:
 
@@ -97,14 +97,23 @@ There is no `spool` binary yet, so every command below is spelled
 
 ## Status
 
-The source runs and its tests pass. "Blocked" below means one thing only:
-twill 1.7.1 has no process interface, so spool cannot shell out to `git`, and
-vendoring from a git source is the one feature that needs to. That is verified
-rather than assumed: there is no `run`, `exec` or `spawn` among the builtins
-twill 1.7.1 defines, and `src/vendor.tw` calls `run`, so the moment a command
-reaches git it dies with `undefined variable "run"`. It is a decision about the
-security surface of running a `.tw` file rather than a missing builtin, and it
-is the last thing between spool and doing its whole job.
+The source runs, its tests pass, and **it fetches**. The one thing this section
+called blocked was that twill had no process interface, so spool could not shell
+out to `git` and vendoring was the single feature that needed to. twill now
+defines `run(program, argv, dir) -> Res[Str, Str]`, with the signature
+`docs/needs.md` entry 1 asked for, and `src/vendor.tw` calls it directly: the
+status-byte encoding that entry called the ugliest thing in spool is gone with
+it.
+
+That is verified by doing it rather than by reading the builtin list. Against a
+local git repository tagged `v1.2.0`, `spool install` clones it, resolves the
+constraint, vendors the package into `twill_modules/` and writes a `spool.lock`
+carrying the commit and the content hash.
+
+Requires `git` on `PATH`, which spool reports plainly rather than failing
+obscurely. Setting `TWILL_NO_EXEC` turns twill's process interface off
+wholesale, and spool then fails to fetch with a message that names the
+variable.
 
 | Piece | State |
 | --- | --- |
@@ -114,10 +123,10 @@ is the last thing between spool and doing its whole job.
 | `spool.lock` writer and reader, deterministic | runs, tested by `tests/lockfile_test.tw` |
 | SHA-256, in twill, verified against published vectors | moved to `std/hash`; `tests/sha256_test.tw` still checks it against the vectors |
 | Package content hashing and verification | runs, tested by `tests/sha256_test.tw` |
-| Vendoring into `twill_modules/` | blocked: needs a process interface for git, which twill 1.7.1 does not have |
+| Vendoring into `twill_modules/` | runs: clones, checks out the resolved tag, verifies the content hash, writes the tree |
 | `init` / `list` / `remove` | run; they touch no network |
-| `add` | writes the dependency into `spool.toml`, then stops where it would fetch |
-| `install` | writes `spool.lock` and the vendor directory; stops where it would fetch a declared git dependency |
+| `add` | writes the dependency into `spool.toml` |
+| `install` | resolves, fetches, vendors, and writes `spool.lock` |
 | Tests | 6 suites, 6 passed, run by CI on every push |
 | A registry | not planned for v0.1. Git sources only |
 | Publishing packages | not in scope. spool consumes, it does not publish |
@@ -266,10 +275,10 @@ myproject/
 spool add tensorstats https://github.com/example/tensorstats
 ```
 
-This is the one step that does not work on twill 1.7.1. `add` writes the
-dependency into `spool.toml` and then stops at git, so the rest of this section
-describes the tree spool produces once there is a process interface, not one it
-can produce today.
+This works from twill 1.8.0, which is the release that added the process
+interface. On 1.7.1 and earlier `add` wrote the dependency into `spool.toml` and
+then stopped at git, and the rest of this section described a tree spool could
+not yet produce.
 
 **2. Gitignore the vendor directory, commit the two spool files.**
 

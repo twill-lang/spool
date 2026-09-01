@@ -81,18 +81,18 @@ fn short_hash(v: Str) -> Str {
 # failing obscurely.
 # `Ok` carries git's output, `Err` carries git's complaint.
 #
-# `run` answers with a status BYTE in front of its output -- `"!"` for a
-# non-zero exit, `" "` otherwise -- because the subset could not return two
-# values. That convention leaked into every caller in this file, along with a
-# `git_ok`/`git_out` pair whose only job was to make it survivable; docs/needs.md
-# entry 10 calls it the ugliest thing in spool. It stops here now: `run`'s
-# encoding is unwrapped once, at the one place that calls it.
+# `run` used to be described here as answering with a status BYTE in front of
+# its output -- `"!"` for a non-zero exit, `" "` otherwise -- because the subset
+# could not return two values, and docs/needs.md entry 10 called that the
+# ugliest thing in spool. The builtin that arrived answers a `Res` instead, so
+# there is no encoding left to unwrap and this function is the shape it always
+# wanted to be: git's own two answers, renamed.
+#
+# `run` takes an argument vector and never a shell, which is what makes it safe
+# to pass a tag or a URL out of somebody else's manifest straight through to
+# git.
 fn git(dir: Str, argv: Arr[Str]) -> Res[Str, Str] {
-  let r = run("git", argv, dir)
-  if r[0] == s.B_SPACE {
-    return Ok(r[1:len(r)])
-  }
-  Err(r[1:len(r)])
+  run("git", argv, dir)
 }
 
 # ensure_clone clones a repository into the cache or updates an existing clone.
@@ -120,16 +120,18 @@ fn ensure_clone(root: Str, url: Str) -> Res[Str, Str] {
 # plain major.minor.patch is skipped rather than reported: repositories carry
 # all kinds of tags, and refusing to resolve because someone tagged "nightly"
 # would be obstructive.
-fn published_versions(root: Str, url: Str) -> Arr[Str] {
+#
+# It answers a `Res` because there are two different empty answers and callers
+# were reporting the wrong one. A repository that clones and carries no readable
+# tag really does publish no versions, and that is `Ok([])`. A repository that
+# could not be reached, or a git that could not be started at all -- no `git` on
+# PATH, `TWILL_NO_EXEC` set, a URL nobody can clone -- has published nothing we
+# know about, and saying "publishes no versions" about it names the wrong thing
+# as the problem. Before this it swallowed both into an empty list.
+fn published_versions(root: Str, url: Str) -> Res[Arr[Str], Str] {
   let out: Arr[Str] = []
-  let dir: Str = match ensure_clone(root, url) {
-    Ok(at) => at,
-    Err(_) => return out,
-  }
-  let listed: Str = match git(dir, ["tag", "--list"]) {
-    Ok(text) => text,
-    Err(_) => return out,
-  }
+  let dir: Str = ensure_clone(root, url)?
+  let listed: Str = git(dir, ["tag", "--list"])?
   let lines = s.split_lines(listed)
   let i = 0
   while i < len(lines) {
@@ -140,7 +142,7 @@ fn published_versions(root: Str, url: Str) -> Arr[Str] {
     }
     i = i + 1
   }
-  out
+  Ok(out)
 }
 
 # tag_for finds the spelling, "1.2.3" or "v1.2.3", that the repository actually
@@ -205,7 +207,7 @@ fn build_catalog(root: Str, m: manifest.Manifest, cat: resolve.Catalog) -> Res[U
     if dict_has(cat.versions, url) {
       continue
     }
-    let versions = published_versions(root, url)
+    let versions: Arr[Str] = published_versions(root, url)?
     cat.versions[url] = s.join(versions, ",")
     let v = 0
     while v < len(versions) {

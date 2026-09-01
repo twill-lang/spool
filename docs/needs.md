@@ -5,13 +5,12 @@ the list of language and runtime features the source uses that `mode systems`
 did not provide, with the file that needs each one and what spool did in the
 meantime.
 
-Most of it is now a record rather than a queue. Of the fourteen entries below,
-thirteen are delivered as of twill 1.7.1, which is the release `spool.toml` and
-CI pin. **One is still open, and it is entry 1: there is no process interface.**
-That is verified rather than assumed: no builtin in twill 1.7.1 starts a
-subprocess, `src/vendor.tw` calls `run`, and any command that reaches git dies
-with `undefined variable "run"`. Vendoring from a git source is the one spool
-feature that waits on it.
+This is now a record rather than a queue. **All fourteen entries below are
+delivered.** Thirteen were delivered as of twill 1.7.1, the release `spool.toml`
+and CI pin, and entry 1 -- the process interface, the one thing between spool
+and fetching a package -- landed after it. Verified by fetching: against a git
+repository tagged `v1.2.0`, `spool install` clones, resolves, vendors into
+`twill_modules/` and writes a `spool.lock` with the commit and content hash.
 
 It was meant to be read as a work queue for the language, not as a complaint.
 Every entry was reached by writing real code and hitting the wall, which is the
@@ -34,11 +33,16 @@ Entry 1 still is.
 
 **Needs:** `run(program: Str, argv: Arr[Str], dir: Str) -> Res[Str, Str]`
 **Used by:** `src/vendor.tw`
-**Status:** **still open on twill 1.7.1.** The only entry here that is.
+**Status:** **done.** The signature is the one asked for here, `Res` included,
+so the `"!"`-flag encoding entry 10 describes did not survive in its last place
+either -- `git()` in `src/vendor.tw` is now one line.
 
-The `Res` in the signature is the one change since this was written. The
-`"!"`-flag encoding entry 10 describes is gone everywhere else in spool, and a
-process interface should not be the last place it survives.
+Two things came with it that this entry asked for without naming. It takes an
+argument vector and never a shell, which is what makes it safe to hand a tag or
+a URL out of somebody else's manifest straight to git. And the security note in
+the last paragraph below is answered rather than deferred: `TWILL_NO_EXEC`, set
+to anything non-empty, refuses every `run` and returns an `Err` saying so, which
+is how spool now reports it instead of blaming the repository.
 
 This is the largest gap and it is not a small one. spool fetches packages by
 running `git clone`, `git fetch`, `git tag`, `git rev-list`, `git show` and
