@@ -4,12 +4,25 @@
 
 First cut of spool, the package manager for twill, written in twill.
 
-It runs, on twill 1.7.1. `init`, `list` and `remove` do their whole job;
-`install` writes the lockfile and the vendor directory; `add` writes the
-dependency into `spool.toml` and then stops where it would fetch, because twill
-has no process interface and spool fetches by running `git`. That is the one
-thing still missing, and `docs/needs.md` entry 1 is the whole of it. `README.md`
-has the status table.
+It runs, and it fetches. `init`, `list`, `remove` and `add` do their whole job,
+and `install` resolves a git dependency, clones it, vendors it into
+`twill_modules/` and writes a `spool.lock` carrying the commit and the content
+hash. Fetching waited on `docs/needs.md` entry 1, a process interface in twill,
+which now exists as `run(program, argv, dir) -> Res[Str, Str]` -- the signature
+that entry asked for. All fourteen entries in that file are delivered.
+`README.md` has the status table.
+
+Two things changed here to meet it:
+
+- `git()` in `src/vendor.tw` is one line. It used to unwrap a status byte the
+  old `run` put in front of its output, because the language could not return
+  two values; `docs/needs.md` entry 10 called that the ugliest thing in spool
+  and this was its last hiding place.
+- `published_versions` answers a `Res` rather than an `Arr`. A repository that
+  clones and carries no readable tag publishes no versions; one that cannot be
+  reached at all -- no `git` on PATH, `TWILL_NO_EXEC` set, a URL nobody can
+  clone -- is a different failure, and folding both into an empty list made
+  spool blame the repository for the local problem.
 
 Added:
 
