@@ -47,7 +47,7 @@ ok    tests/ui_test.tw
 ```
 
 You need twill 1.7.0 or newer. Everything shown in this file was run on twill
-1.7.1, which is what CI pins. `docs/needs.md` is still worth reading -- it is
+1.8.0, which is what CI pins. `docs/needs.md` is still worth reading -- it is
 the list of what this library asked the language for, and it now records which
 of those arrived and which are still open.
 
@@ -58,12 +58,12 @@ is a twill binary:
 
 ```bash
 curl -fsSL -o twill \
-  https://github.com/twill-lang/twill/releases/download/v1.7.1/twill-v1.7.1-linux-amd64
+  https://github.com/twill-lang/twill/releases/download/v1.8.0/twill-v1.8.0-linux-amd64
 chmod +x twill
 ./twill --version
 ```
 
-The v1.7.1 assets are `twill-v1.7.1-linux-amd64`, `-linux-arm64`,
+The v1.8.0 assets are `twill-v1.8.0-linux-amd64`, `-linux-arm64`,
 `-darwin-amd64`, `-darwin-arm64` and `-windows-amd64.exe`. Then clone this
 repository and run `main.tw`:
 
@@ -275,10 +275,10 @@ myproject/
 spool add tensorstats https://github.com/example/tensorstats
 ```
 
-This is the one step that does not work on twill 1.7.1. `add` writes the
-dependency into `spool.toml` and then stops at git, so the rest of this section
-describes the tree spool produces once there is a process interface, not one it
-can produce today.
+This works from twill 1.8.0, which is the release that added the process
+interface. On 1.7.1 and earlier `add` wrote the dependency into `spool.toml` and
+then stopped at git, and the rest of this section described a tree spool could
+not yet produce.
 
 **2. Gitignore the vendor directory, commit the two spool files.**
 
