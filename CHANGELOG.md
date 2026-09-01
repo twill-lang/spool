@@ -12,6 +12,13 @@ which now exists as `run(program, argv, dir) -> Res[Str, Str]` -- the signature
 that entry asked for. All fourteen entries in that file are delivered.
 `README.md` has the status table.
 
+**This needs a twill newer than 1.7.1.** `run` is not in a twill release yet, so
+until one exists this code checks and runs only against a twill built from the
+language repository, and CI — which pins `v1.7.1` on purpose, so that a green
+run means a known compiler — fails at `twill check` with `unknown name "run"`.
+That is the correct failure rather than something to work around: the pin moves
+when the release exists, and the `^1.7.0` in `spool.toml` moves with it.
+
 Two things changed here to meet it:
 
 - `git()` in `src/vendor.tw` is one line. It used to unwrap a status byte the
