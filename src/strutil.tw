@@ -330,10 +330,13 @@ fn compare_str(a: Str, b: Str) -> I64 {
   0
 }
 
-# sort_strs is an insertion sort. The inputs are dependency lists, tens of
-# entries at most, so the quadratic cost is invisible and the implementation is
-# short enough to be obviously correct. That trade would be wrong at any scale
-# spool is likely to reach.
+# sort_strs is the builtin, which has ordered a list of strings since twill
+# 1.5.1 and a list of anything since 1.9.0. It was an insertion sort here, on
+# the honest grounds that dependency lists are tens of entries and the quadratic
+# cost is invisible; the argument for deleting it is not speed, it is that a
+# sort nobody has to read is better than a short one they do.
+fn sort_strs(xs: Arr[Str]) -> Arr[Str] = sort(xs)
+
 fn sort_strs(xs: Arr[Str]) -> Arr[Str] {
   let out: Arr[Str] = []
   let i = 0
