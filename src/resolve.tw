@@ -225,23 +225,8 @@ fn unsatisfiable(name: Str, joined: Str, versions: Arr[semver.Version]) -> Str {
     + "; available: " + s.join(have, ", ")
 }
 
-fn sort_versions(vs: Arr[semver.Version]) -> Arr[semver.Version] {
-  let out: Arr[semver.Version] = []
-  let i = 0
-  while i < len(vs) {
-    push(out, vs[i])
-    i = i + 1
-  }
-  let j = 1
-  while j < len(out) {
-    let cur = out[j]
-    let k = j - 1
-    while k >= 0 and semver.compare(out[k], cur) > 0 {
-      out[k + 1] = out[k]
-      k = k - 1
-    }
-    out[k + 1] = cur
-    j = j + 1
-  }
-  out
-}
+# Ascending by semver, through the builtin's comparison (twill 1.9.0). The
+# comparison is semver's own, which is the point: a version order is not a
+# string order, and 1.10.0 sorts after 1.9.0 rather than before it.
+fn sort_versions(vs: Arr[semver.Version]) -> Arr[semver.Version] =
+  sort(vs, fn(a: semver.Version, b: semver.Version) -> Bool { semver.compare(a, b) < 0 })

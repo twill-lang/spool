@@ -65,26 +65,12 @@ fn has(l: Lock, name: Str) -> Bool {
   }
 }
 
-fn sort_entries(entries: Arr[Entry]) -> Arr[Entry] {
-  let out: Arr[Entry] = []
-  let i = 0
-  while i < len(entries) {
-    push(out, entries[i])
-    i = i + 1
-  }
-  let j = 1
-  while j < len(out) {
-    let cur = out[j]
-    let k = j - 1
-    while k >= 0 and s.compare_str(out[k].name, cur.name) > 0 {
-      out[k + 1] = out[k]
-      k = k - 1
-    }
-    out[k + 1] = cur
-    j = j + 1
-  }
-  out
-}
+# Ordered by name through the builtin's comparison (twill 1.9.0), and stable, so
+# a lockfile's line order is a function of its contents and a re-render produces
+# no diff.
+fn sort_entries(entries: Arr[Entry]) -> Arr[Entry] =
+  sort(entries, fn(a: Entry, b: Entry) -> Bool { s.compare_str(a.name, b.name) < 0 })
+
 
 # render builds into a Bytes. Six concatenations per package against a string
 # that already holds every package before it is quadratic in the size of the

@@ -293,15 +293,18 @@ itself.
 
 **Would improve:** `src/strutil.tw`, `src/manifest.tw`, `src/lockfile.tw`,
 `src/resolve.tw`
-**Status:** **half delivered** (twill 1.7). The half that was a language
-question is answered: a function may be passed to a systems-mode function, with
-a `fn(Str, Str) -> Bool` parameter type, and it checks and runs.
+**Status: delivered in twill 1.9.0, and all four are gone.** `sort` orders a
+list of numbers or strings and takes a comparison, so each of these is now one
+call: strings straight through, deps and lockfile entries by `compare_str` on
+the name, versions by `semver.compare`.
 
-There is still no generic sort builtin, and there are still four near-identical
-insertion sorts in this source, one per element type, differing only in the
-comparison. They are correct and small, and having four of them is still four
-times as many places for the ordering that the lockfile depends on to go wrong.
-A comparison-taking sort can be written in twill now. Nobody has written it.
+The half that was a language question was answered in 1.7, when a function
+became something a systems-mode function could take. What was missing after that
+was a sort willing to accept one, and the entry's own complaint was the right
+one to fix: four near-identical insertion sorts differing only in the comparison
+is four times as many places for the ordering the lockfile depends on to go
+wrong. The builtin is stable, which is what makes a re-rendered lockfile produce
+no diff.
 
 ### 13. A `sha256` builtin
 
