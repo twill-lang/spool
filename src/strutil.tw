@@ -337,23 +337,3 @@ fn compare_str(a: Str, b: Str) -> I64 {
 # sort nobody has to read is better than a short one they do.
 fn sort_strs(xs: Arr[Str]) -> Arr[Str] = sort(xs)
 
-fn sort_strs(xs: Arr[Str]) -> Arr[Str] {
-  let out: Arr[Str] = []
-  let i = 0
-  while i < len(xs) {
-    push(out, xs[i])
-    i = i + 1
-  }
-  let j = 1
-  while j < len(out) {
-    let cur = out[j]
-    let k = j - 1
-    while k >= 0 and compare_str(out[k], cur) > 0 {
-      out[k + 1] = out[k]
-      k = k - 1
-    }
-    out[k + 1] = cur
-    j = j + 1
-  }
-  out
-}
