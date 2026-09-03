@@ -104,28 +104,6 @@ fn has_dep(m: Manifest, name: Str) -> Bool {
 fn sort_deps(deps: Arr[Dep]) -> Arr[Dep] =
   sort(deps, fn(a: Dep, b: Dep) -> Bool { s.compare_str(a.name, b.name) < 0 })
 
-# at most, so the quadratic cost is invisible next to reading the file.
-fn sort_deps(deps: Arr[Dep]) -> Arr[Dep] {
-  let out: Arr[Dep] = []
-  let i = 0
-  while i < len(deps) {
-    push(out, deps[i])
-    i = i + 1
-  }
-  let j = 1
-  while j < len(out) {
-    let cur = out[j]
-    let k = j - 1
-    while k >= 0 and s.compare_str(out[k].name, cur.name) > 0 {
-      out[k + 1] = out[k]
-      k = k - 1
-    }
-    out[k + 1] = cur
-    j = j + 1
-  }
-  out
-}
-
 fn parse(src: Str) -> Res[Manifest, Str] {
   let doc: toml.Doc = toml.parse(src)?
 
