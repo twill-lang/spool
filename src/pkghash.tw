@@ -8,7 +8,6 @@ mode systems
 # over different bytes under the same commit, this is what notices.
 
 import "strutil.tw" as s
-import "std/hash" as sha
 import "std/text" as text
 
 let HASH_PREFIX = "sha256:"
@@ -54,7 +53,7 @@ fn canonical(paths: Arr[Str], contents: Arr[Str]) -> Str {
 # `/` as the separator on every platform, so the same package hashes the same
 # on Windows and Linux; sort_tree below is what callers use to guarantee it.
 fn hash_tree(paths: Arr[Str], contents: Arr[Str]) -> Str {
-  HASH_PREFIX + sha.hash_str(canonical(paths, contents))
+  HASH_PREFIX + sha256(canonical(paths, contents))
 }
 
 # is_excluded drops VCS metadata, which differs between a clone and an archive

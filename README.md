@@ -46,8 +46,8 @@ ok    tests/ui_test.tw
 6 file(s): 6 passed, 0 failed
 ```
 
-You need twill 1.7.0 or newer. Everything shown in this file was run on twill
-1.8.0, which is what CI pins. `docs/needs.md` is still worth reading -- it is
+You need twill 1.12.0 or newer. Everything shown in this file was run on twill
+1.12.0, which is what CI pins. `docs/needs.md` is still worth reading -- it is
 the list of what this library asked the language for, and it now records which
 of those arrived and which are still open.
 
@@ -58,12 +58,12 @@ is a twill binary:
 
 ```bash
 curl -fsSL -o twill \
-  https://github.com/twill-lang/twill/releases/download/v1.8.0/twill-v1.8.0-linux-amd64
+  https://github.com/twill-lang/twill/releases/download/v1.12.0/twill-v1.12.0-linux-amd64
 chmod +x twill
 ./twill --version
 ```
 
-The v1.8.0 assets are `twill-v1.8.0-linux-amd64`, `-linux-arm64`,
+The v1.12.0 assets are `twill-v1.12.0-linux-amd64`, `-linux-arm64`,
 `-darwin-amd64`, `-darwin-arm64` and `-windows-amd64.exe`. Then clone this
 repository and run `main.tw`:
 
@@ -121,7 +121,7 @@ variable.
 | Version parsing and `^` constraints | runs, tested by `tests/semver_test.tw` |
 | Dependency resolver, pure and network-free | runs, tested by `tests/resolve_test.tw` |
 | `spool.lock` writer and reader, deterministic | runs, tested by `tests/lockfile_test.tw` |
-| SHA-256, in twill, verified against published vectors | moved to `std/hash`; `tests/sha256_test.tw` still checks it against the vectors |
+| SHA-256, in twill, verified against published vectors | moved to `std/hash`, then to the `sha256` builtin; `tests/sha256_test.tw` still checks it against the vectors |
 | Package content hashing and verification | runs, tested by `tests/sha256_test.tw` |
 | Vendoring into `twill_modules/` | runs: clones, checks out the resolved tag, verifies the content hash, writes the tree |
 | `init` / `list` / `remove` | run; they touch no network |
@@ -324,7 +324,7 @@ src/toml.tw          the spool.toml reader
 src/semver.tw        versions and `^` constraints
 src/manifest.tw      spool.toml model, parse, render, add/remove a dependency
 src/resolve.tw       the resolver: pure, no IO, testable from a literal table
-src/pkghash.tw       the package content hash and its verification, over std/hash
+src/pkghash.tw       the package content hash and its verification, over the sha256 builtin
 src/lockfile.tw      spool.lock render and parse
 src/vendor.tw        git, the filesystem, and nothing else in spool touches them
 src/commands.tw      add, install, list, remove, init
@@ -344,9 +344,11 @@ None. Not "few". None. No third-party twill packages, no Go, no shell scripts
 doing the real work, no vendored anything.
 
 SHA-256 used to be in this repository, in twill, for exactly that reason. It is
-now twill's `std/hash`, which is the same argument arriving at the right place:
-a digest the whole toolchain has to agree on byte for byte should have one
-implementation, and the standard library is not a third-party dependency.
+now twill's `sha256` builtin, held to `std/hash` by a test in twill, which is
+the same argument arriving at the right place: a digest the whole toolchain has
+to agree on byte for byte should have one implementation, and the language is
+not a third-party dependency. The builtin also runs at machine speed, 16 MB in
+6.5 ms on one machine, where `std/hash` did about 100 kB/s on the same one.
 `src/pkghash.tw` is what remains here, and it is the part that is spool's:
 the canonical serialisation of a file tree that gets hashed.
 
