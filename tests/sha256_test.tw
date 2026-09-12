@@ -2,8 +2,10 @@ mode systems
 
 # SHA-256 against the published test vectors.
 #
-# These are the reason src/sha256.tw can be trusted at all. A hash function that
-# is only tested against itself is a checksum with delusions.
+# These are the reason the `sha256` builtin src/pkghash.tw calls can be trusted
+# at all. A hash function that is only tested against itself is a checksum with
+# delusions. `std/hash` is still imported for `padded_len`, which is where the
+# block boundaries are stated.
 
 import "harness.tw" as t
 import "../src/strutil.tw" as s
@@ -22,45 +24,46 @@ fn refusal(r: Res[Unit, Str]) -> Str {
 
 fn the_empty_string_hashes_to_the_published_vector() {
   t.equal_str("sha256 of the empty string",
-    sha.hash_str(""),
+    sha256(""),
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
 }
 
 fn abc_hashes_to_the_published_vector() {
   t.equal_str("sha256 of abc",
-    sha.hash_str("abc"),
+    sha256("abc"),
     "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
 }
 
 fn a_message_spanning_two_blocks_hashes_to_the_published_vector() {
   t.equal_str("sha256 of the 56-byte two-block vector",
-    sha.hash_str("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
+    sha256("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
     "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1")
 }
 
 fn a_million_a_characters_is_not_tested_here_but_the_boundary_lengths_are() {
-  # The 1,000,000-character vector is skipped deliberately: at the speed this
-  # implementation runs in an interpreter it would dominate the suite. The
-  # lengths that actually exercise the padding logic are 55, 56 and 64 bytes,
-  # which straddle the point where padding spills into an extra block.
+  # The 1,000,000-character vector is skipped deliberately: the builtin hashes
+  # it in under a millisecond, but s.repeat takes twenty seconds to build it,
+  # and that would dominate the suite. The lengths that actually exercise the
+  # padding logic are 55, 56 and 64 bytes, which straddle the point where
+  # padding spills into an extra block.
   t.equal_i64("55 bytes pads into one block", sha.padded_len(55), 64)
   t.equal_i64("56 bytes pads into two blocks", sha.padded_len(56), 128)
   t.equal_i64("64 bytes pads into two blocks", sha.padded_len(64), 128)
   t.equal_i64("0 bytes pads into one block", sha.padded_len(0), 64)
 
   t.equal_str("sha256 of 55 a characters",
-    sha.hash_str(s.repeat("a", 55)),
+    sha256(s.repeat("a", 55)),
     "9f4390f8d30c2dd92ec9f095b65e2b9ae9b0a925a5258e241c9f1e910f734318")
   t.equal_str("sha256 of 56 a characters",
-    sha.hash_str(s.repeat("a", 56)),
+    sha256(s.repeat("a", 56)),
     "b35439a4ac6f0948b6d6f9e3c6af0f5f590ce20f1bde7090ef7970686ec6738a")
   t.equal_str("sha256 of 64 a characters",
-    sha.hash_str(s.repeat("a", 64)),
+    sha256(s.repeat("a", 64)),
     "ffe054fe7ae0cb6dc65c3af9b61d5209f439851db43d0ba5997337df154668eb")
 }
 
 fn every_digest_is_sixty_four_lowercase_hex_characters() {
-  let d = sha.hash_str("anything")
+  let d = sha256("anything")
   t.equal_i64("a digest is 64 characters", len(d), 64)
   let i = 0
   let ok = true

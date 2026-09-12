@@ -41,7 +41,10 @@ Added:
   SHA-256 test vectors including the padding boundaries at 55, 56 and 64 bytes.
   This began as `src/sha256.tw`, a SHA-256 written here in twill; it moved into
   the standard library so the toolchain has one implementation of a digest that
-  everything must agree on byte for byte.
+  everything must agree on byte for byte. As of twill 1.11 that implementation
+  is the `sha256` builtin, and `src/pkghash.tw` calls it: 16 MB in 6.5 ms on
+  one machine, where `std/hash` did about 100 kB/s. The pin, the README's
+  install line and CI move to 1.12.0 with it.
 - A package content hash over a length-prefixed serialisation of the file tree,
   excluding VCS metadata, and verification of it on every install.
 - Vendoring into `twill_modules/`, which is where twill's `import` can reach it.

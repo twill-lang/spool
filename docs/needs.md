@@ -321,9 +321,10 @@ on byte for byte should have one implementation and not one per repository.
 `warp` wanted the same function for cache keys, and two transcriptions of
 SHA-256 that must agree is the worse risk.
 
-It is `std/hash` now. `src/sha256.tw` is deleted, `src/pkghash.tw` calls
-`sha.hash_str`, and `tests/sha256_test.tw` still checks the published vectors,
-including the padding boundaries at 55, 56 and 64 bytes, through `std/hash`. The
+It is the `sha256` builtin now, from twill 1.11, which is `std/hash` at machine
+speed and is held to it by a test in twill. `src/sha256.tw` is deleted,
+`src/pkghash.tw` calls `sha256`, and `tests/sha256_test.tw` still checks the
+published vectors, including the padding boundaries at 55, 56 and 64 bytes. The
 part that stayed here is the part that is actually spool's: the canonical,
 length-prefixed serialisation of a file tree in `src/pkghash.tw`.
 
