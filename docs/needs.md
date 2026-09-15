@@ -5,7 +5,7 @@ the list of language and runtime features the source uses that `mode systems`
 did not provide, with the file that needs each one and what spool did in the
 meantime.
 
-This is now a record rather than a queue. **All fourteen entries below are
+This is now a record rather than a queue. **All fifteen entries below are
 delivered.** Thirteen were delivered as of twill 1.7.1, the release `spool.toml`
 and CI pin, and entry 1 -- the process interface, the one thing between spool
 and fetching a package -- landed after it. Verified by fetching: against a git
@@ -346,3 +346,34 @@ this subset will ask.
   passing `Arr` and `Dict` values into `add_deps` to be filled in.
 - Does a `while` loop's condition see bindings introduced in its body on the
   next iteration? spool assumes normal scoping.
+
+### 15. Assertions in the toolchain
+
+**Would improve:** `tests/`
+**Status:** **delivered** (twill 1.11), and taken up. This entry is written
+after the fact, because skein's entry 16 said the ask for a `std/test` "should
+be its own entry when someone writes it" and nobody had.
+
+`twill test` arrived in 1.8 and solved discovery; the assertions each file
+called were still `tests/harness.tw`, the copy every repository in the
+ecosystem carried. twill 1.11's `std/test` is those assertions in the
+toolchain, and its own header names spool's `is_none_i64` and `equal_opt_i64`
+as the workaround its `fail(name, why)` exists to replace: both recorded a
+failure as `check(name, false)` and threw away the reason. The three call
+sites are a `match` now whose wrong arm calls `t.fail` with what was actually
+there, and `tests/harness.tw` keeps one predicate, `before`, and nothing that
+counts.
+
+The visible change is the summary line. The copy printed `lockfile: 54 passed,
+0 failed`, which the runner could not read because it looks for the word
+`passed` followed by a number, so `twill test` showed each file with no counts
+beside it. `std/test` prints `lockfile passed 54 failed 0` and then `OK` or
+`FAILED`, and the runner shows `(54 passed, 0 failed)` next to every file: 207
+assertions across the six. The `exit(1)` is gone with it; `report` returns
+the status, which is why the CI job is unchanged.
+
+One rule the move fixed in place, so the next reader does not relearn it: a
+helper module that imports `std/test` gets its own instance and its own
+counter, and a failure it records never reaches the suite's `report`. That
+was measured in skein with a probe that came back green with a failure in it.
+Anything that counts lives in the suite, not in a helper.

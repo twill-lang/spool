@@ -5,7 +5,7 @@ mode systems
 # network or the filesystem, which is the whole reason resolve.tw is separate
 # from vendor.tw.
 
-import "harness.tw" as t
+import "std/test" as t
 import "../src/strutil.tw" as s
 import "../src/manifest.tw" as manifest
 import "../src/resolve.tw" as resolve

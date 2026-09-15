@@ -1,6 +1,7 @@
 mode systems
 
-import "harness.tw" as t
+import "std/test" as t
+import "harness.tw" as h
 import "../src/strutil.tw" as s
 import "../src/lockfile.tw" as lockfile
 
@@ -38,7 +39,7 @@ fn render_sorts_packages_regardless_of_input_order() {
   let b = lockfile.render(lockfile.Lock { packages: [entry("mid"), entry("zeta"), entry("alpha")], err: "" })
   t.equal_str("input order does not change the rendered lockfile", a, b)
   t.check("packages come out in name order",
-    t.before(a, "alpha", "mid") and t.before(a, "mid", "zeta"))
+    h.before(a, "alpha", "mid") and h.before(a, "mid", "zeta"))
 }
 
 fn render_is_byte_for_byte_stable_across_repeated_calls() {
@@ -115,8 +116,14 @@ fn parse_rejects_unknown_keys() {
 
 fn find_looks_up_a_package_by_name() {
   let l = lockfile.Lock { packages: [entry("a"), entry("b")], err: "" }
-  t.equal_opt_i64("find locates a locked package", lockfile.find(l, "b"), 1)
-  t.is_none_i64("find reports a package that is not locked", lockfile.find(l, "missing"))
+  match lockfile.find(l, "b") {
+    Some(i) => t.equal_i64("find locates a locked package", i, 1),
+    None => t.fail("find locates a locked package", "find returned None"),
+  }
+  match lockfile.find(l, "missing") {
+    Some(i) => t.fail("find reports a package that is not locked", "find returned Some(" + str(i) + ")"),
+    None => t.check("find reports a package that is not locked", true),
+  }
 }
 
 fn an_empty_lockfile_renders_and_parses() {

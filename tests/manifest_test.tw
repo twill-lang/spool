@@ -1,6 +1,7 @@
 mode systems
 
-import "harness.tw" as t
+import "std/test" as t
+import "harness.tw" as h
 import "../src/strutil.tw" as s
 import "../src/manifest.tw" as manifest
 
@@ -135,7 +136,7 @@ fn render_sorts_dependencies_and_round_trips() {
     ],
   }
   let out = manifest.render(m)
-  t.check("render sorts dependencies", t.before(out, "alpha", "zebra"))
+  t.check("render sorts dependencies", h.before(out, "alpha", "zebra"))
   let back = parsed(manifest.parse(out))
   t.equal_str("render is stable across a round trip", manifest.render(back), out)
 }

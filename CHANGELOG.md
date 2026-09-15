@@ -2,6 +2,20 @@
 
 ## v0.1.0 (unreleased)
 
+### Changed
+
+- **The assertions are `std/test`.** twill 1.11 ships the assertions the test
+  runner already assumed, and names spool's `is_none_i64` and `equal_opt_i64`
+  as the workaround its `fail(name, why)` replaces: both recorded a failure as
+  `check(name, false)` and threw away the reason. Every suite imports
+  `std/test` as `t` now, the three sites that used those two helpers are a
+  `match` whose `None` or `Some` arm calls `t.fail` with what was actually
+  there, and `tests/harness.tw` keeps one predicate, `before`, and nothing
+  that counts. `report` returns the status instead of calling `exit`, and
+  prints its summary in the shape `twill test` reads, so the runner shows the
+  counts beside each file: 207 assertions across six suites, where before it
+  showed none. `docs/needs.md` entry 15 records it.
+
 First cut of spool, the package manager for twill, written in twill.
 
 It runs, and it fetches. `init`, `list`, `remove` and `add` do their whole job,

@@ -7,7 +7,7 @@ mode systems
 # delusions. `std/hash` is still imported for `padded_len`, which is where the
 # block boundaries are stated.
 
-import "harness.tw" as t
+import "std/test" as t
 import "../src/strutil.tw" as s
 import "std/hash" as sha
 import "../src/pkghash.tw" as pkghash
