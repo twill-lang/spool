@@ -1,68 +1,19 @@
 mode systems
 
-# A test harness, in twill.
-#
-# There is no test runner in the toolchain yet, so a test file is a program:
-# it calls these, and `report` exits non-zero if anything failed. That is
-# primitive and it is enough to be a CI gate the day `mode systems` runs.
+# What is left of the test harness once the assertions are twill 1.11's
+# `std/test`: one predicate two suites use to check that a rendering is in
+# order. It records nothing. A helper here that imported `std/test` would get
+# its own instance of the module and its own counter, and a failure it recorded
+# would never reach the suite's `report`; that was measured, in skein, with a
+# probe that came back green with a failure in it. So this file holds nothing
+# that counts, and a suite passes `before` to `t.check`.
 #
 # Test names are written as sentences, because a failing test's name is the
 # only documentation anyone reads at the moment it fails.
 
 import "../src/strutil.tw" as s
 
-struct Counter {
-  passed: I64,
-  failed: I64,
-}
-
-let TESTS = Counter { passed: 0, failed: 0 }
-
-fn check(name: Str, ok: Bool) {
-  if ok {
-    TESTS.passed = TESTS.passed + 1
-  } else {
-    TESTS.failed = TESTS.failed + 1
-    print("FAIL " + name)
-  }
-}
-
-fn equal_str(name: Str, got: Str, want: Str) {
-  if got == want {
-    TESTS.passed = TESTS.passed + 1
-  } else {
-    TESTS.failed = TESTS.failed + 1
-    print("FAIL " + name)
-    print("  got:  " + got)
-    print("  want: " + want)
-  }
-}
-
-fn equal_i64(name: Str, got: I64, want: I64) {
-  equal_str(name, s.i64_to_str(got), s.i64_to_str(want))
-}
-
-# The searches in strutil, manifest and lockfile return Opt[I64] rather than an
-# index-or-minus-one. These three keep the unwrapping out of the tests, so what
-# a test asserts stays on one line.
-
-fn equal_opt_i64(name: Str, got: Opt[I64], want: I64) {
-  match got {
-    Some(v) => equal_i64(name, v, want),
-    None => check(name, false),
-  }
-}
-
-fn is_none_i64(name: Str, got: Opt[I64]) {
-  match got {
-    Some(_) => check(name, false),
-    None => check(name, true),
-  }
-}
-
-# before reports whether `first` occurs before `second` in `hay`. A needle that
-# is absent fails, which is stricter than the comparison this replaced: there a
-# missing needle was -1 and still sorted before everything.
+# Whether `first` appears before `second` in `hay`. False when either is absent.
 fn before(hay: Str, first: Str, second: Str) -> Bool {
   match s.index_of(hay, first) {
     Some(a) => match s.index_of(hay, second) {
@@ -70,12 +21,5 @@ fn before(hay: Str, first: Str, second: Str) -> Bool {
       None => false,
     },
     None => false,
-  }
-}
-
-fn report(suite: Str) {
-  print(suite + ": " + s.i64_to_str(TESTS.passed) + " passed, " + s.i64_to_str(TESTS.failed) + " failed")
-  if TESTS.failed > 0 {
-    exit(1)
   }
 }

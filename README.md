@@ -36,12 +36,12 @@ twill on every push rather than gating on the prose in this file.
 
 ```
 $ twill test tests
-ok    tests/lockfile_test.tw
-ok    tests/manifest_test.tw
-ok    tests/resolve_test.tw
-ok    tests/semver_test.tw
-ok    tests/sha256_test.tw
-ok    tests/ui_test.tw
+ok    tests/lockfile_test.tw  (54 passed, 0 failed)
+ok    tests/manifest_test.tw  (44 passed, 0 failed)
+ok    tests/resolve_test.tw  (37 passed, 0 failed)
+ok    tests/semver_test.tw  (33 passed, 0 failed)
+ok    tests/sha256_test.tw  (28 passed, 0 failed)
+ok    tests/ui_test.tw  (11 passed, 0 failed)
 
 6 file(s): 6 passed, 0 failed
 ```

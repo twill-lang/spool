@@ -1,6 +1,6 @@
 mode systems
 
-import "harness.tw" as t
+import "std/test" as t
 import "../src/ui.tw" as ui
 import "std/term/caps" as cp
 import "std/term/theme" as th
