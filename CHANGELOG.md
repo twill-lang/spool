@@ -4,6 +4,9 @@
 
 ### Changed
 
+- **The pin is twill 1.13.0.** `spool.toml`, the CI workflow and the README's
+  install line move from 1.12.0 to 1.13.0. This is a pin-currency bump, not a
+  behaviour change: the six suites pass on 1.13.0 with the same 207 assertions.
 - **The assertions are `std/test`.** twill 1.11 ships the assertions the test
   runner already assumed, and names spool's `is_none_i64` and `equal_opt_i64`
   as the workaround its `fail(name, why)` replaces: both recorded a failure as

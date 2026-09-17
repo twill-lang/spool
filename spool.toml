@@ -18,4 +18,4 @@ entry = "src/commands.tw"
 # this source was written against. spool has no notion of a toolchain dependency,
 # so it is declared as an ordinary git dependency, the same way every other
 # package in the ecosystem declares it.
-twill = { version = "^1.12.0", git = "https://github.com/twill-lang/twill" }
+twill = { version = "^1.13.0", git = "https://github.com/twill-lang/twill" }
