@@ -46,7 +46,7 @@ ok    tests/ui_test.tw  (11 passed, 0 failed)
 6 file(s): 6 passed, 0 failed
 ```
 
-You need twill 1.19.0 or newer. Everything shown in this file was run on twill
+You need twill 1.11.0 or newer. Everything shown in this file was run on twill
 1.19.0, which is what CI pins. `docs/needs.md` is still worth reading -- it is
 the list of what this library asked the language for, and it now records which
 of those arrived and which are still open.
