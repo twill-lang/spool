@@ -47,7 +47,7 @@ ok    tests/ui_test.tw  (11 passed, 0 failed)
 ```
 
 You need twill 1.11.0 or newer. Everything shown in this file was run on twill
-1.19.0, which is what CI pins. `docs/needs.md` is still worth reading -- it is
+1.19.1, which is what CI pins. `docs/needs.md` is still worth reading -- it is
 the list of what this library asked the language for, and it now records which
 of those arrived and which are still open.
 
@@ -58,12 +58,12 @@ is a twill binary:
 
 ```bash
 curl -fsSL -o twill \
-  https://github.com/twill-lang/twill/releases/download/v1.19.0/twill-v1.19.0-linux-amd64
+  https://github.com/twill-lang/twill/releases/download/v1.19.1/twill-v1.19.1-linux-amd64
 chmod +x twill
 ./twill --version
 ```
 
-The v1.19.0 assets are `twill-v1.19.0-linux-amd64`, `-linux-arm64`,
+The v1.19.1 assets are `twill-v1.19.1-linux-amd64`, `-linux-arm64`,
 `-darwin-amd64`, `-darwin-arm64` and `-windows-amd64.exe`. Then clone this
 repository and run `main.tw`:
 
